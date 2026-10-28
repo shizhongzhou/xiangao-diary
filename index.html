@@ -122,7 +122,8 @@ textarea::placeholder { color: var(--muted); }
 
 /* 拍照页（深色） */
 .cam { flex: 1; display: flex; flex-direction: column; background: var(--dark); color: var(--white); }
-.cam .top { display: flex; align-items: center; justify-content: center; padding-block: 12px; }
+.cam .top { display: flex; align-items: center; justify-content: center; padding-block: 12px; min-height: 68px; }
+.cam-title { font-size: 17px; font-weight: 800; letter-spacing: .5px; color: var(--white); }
 .viewfinder { flex: 1 1 auto; min-height: 0; margin: 0 12px; border-radius: 28px; background: var(--white); position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .viewfinder video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--dark); }
 .viewfinder video.mirror { transform: scaleX(-1); }
@@ -255,15 +256,16 @@ textarea::placeholder { color: var(--muted); }
  * 每条线都画在两个色块的分界上，所以每个格子天然是封闭的，填色不会漏到别的格子。
  * 线条再做平滑和抗锯齿，得到粗细均匀、圆润的涂色本线条。
  */
-const STYLE_LIST = [
-    { id: 'thin', label: '细线' },
-    { id: 'bold', label: '粗线' },
-    { id: 'comic', label: '漫画' },
-];
+/** 线稿参数（粗细结合的一种风格） */
 const PARAMS = {
-    thin: { colors: 9, minCell: 1 / 1400, smooth: 2, thickness: 1, darkFill: false, detail: 7 },
-    bold: { colors: 7, minCell: 1 / 650, smooth: 4, thickness: 2, darkFill: false, detail: 10 },
-    comic: { colors: 6, minCell: 1 / 500, smooth: 4, thickness: 2, darkFill: true, detail: 12 },
+    colors: 9, // 分色数量：越多格子越多、细节越多
+    minCell: 1 / 1100, // 最小格子占全图的比例：越大画面越简洁
+    smooth: 3, // 边界平滑次数：越多线条越圆润
+    thinRadius: 0.7, // 细线半径（像素）
+    boldRadius: 2.6, // 粗线半径（像素）
+    boldFrom: 10, // 两侧颜色反差（Lab 色差）大于这个值开始变粗
+    boldFull: 40, // 反差达到这个值时是最粗的线
+    detail: 10, // 细节线灵敏度：越小细节越多（五官、发丝）
 };
 /** 输出线稿的最长边（像素） */
 const WORK_SIZE = 960;
@@ -627,29 +629,67 @@ function mergeSmall(lab, w, h, minArea) {
     return seg;
 }
 // ---------- 照片 → 线稿 ----------
-function makeLineArt(rgba, w, h, style) {
-    const P = PARAMS[style];
+/** 按半径画一个抗锯齿的圆点到线条浓度图里（取最大值，粗细线自然衔接） */
+function stamp(cov, w, h, cx, cy, r) {
+    const R = Math.ceil(r + 1);
+    for (let dy = -R; dy <= R; dy++) {
+        const y = cy + dy;
+        if (y < 0 || y >= h)
+            continue;
+        for (let dx = -R; dx <= R; dx++) {
+            const x = cx + dx;
+            if (x < 0 || x >= w)
+                continue;
+            const c = r + 0.5 - Math.sqrt(dx * dx + dy * dy);
+            if (c <= 0)
+                continue;
+            const i = y * w + x;
+            const v = c > 1 ? 1 : c;
+            if (v > cov[i])
+                cov[i] = v;
+        }
+    }
+}
+/**
+ * 照片 → 涂色本线稿。
+ * 同一张图里粗细结合：反差大的轮廓（人物外形、物体边缘）画粗线，
+ * 反差小的内部分界画细线，五官、发丝等细节用更细的笔触。
+ */
+function makeLineArt(rgba, w, h) {
+    const P = PARAMS;
     const n = w * h;
+    const scale = Math.max(w, h) / 960;
     // 1. 在小图上分色
     const f = Math.min(1, SEG_SIZE / Math.max(w, h));
     const sw = Math.max(8, Math.round(w * f)), sh = Math.max(8, Math.round(h * f));
     const sn = sw * sh;
     const ch = toSmallLab(rgba, w, h, sw, sh);
     bilateral(ch, sw, sh, 4);
-    const { lab, centerL } = kmeans(ch, sn, P.colors);
+    const { lab } = kmeans(ch, sn, P.colors);
     let seg = modeFilter(Int32Array.from(lab), sw, sh, 1);
     seg = modeFilter(seg, sw, sh, 1);
-    // 记下每个格子原来的颜色编号（漫画风要用来判断哪些是暗部）
     seg = mergeSmall(seg, sw, sh, Math.max(12, Math.round(sn * P.minCell)));
+    // 每个格子的平均颜色，用来判断两边反差有多大
     const segCount = seg.reduce((m, v) => Math.max(m, v), 0) + 1;
-    const segL = new Float32Array(segCount), segN = new Float32Array(segCount);
+    const mL = new Float32Array(segCount), mA = new Float32Array(segCount), mB = new Float32Array(segCount), cnt = new Float32Array(segCount);
     for (let i = 0; i < sn; i++) {
-        segL[seg[i]] += ch[0][i];
-        segN[seg[i]]++;
+        const s = seg[i];
+        mL[s] += ch[0][i];
+        mA[s] += ch[1][i];
+        mB[s] += ch[2][i];
+        cnt[s]++;
     }
     for (let s = 0; s < segCount; s++)
-        segL[s] = segN[s] ? segL[s] / segN[s] : 100;
-    // 2. 放大到输出尺寸，再平滑边界
+        if (cnt[s]) {
+            mL[s] /= cnt[s];
+            mA[s] /= cnt[s];
+            mB[s] /= cnt[s];
+        }
+    const contrast = (a, b) => {
+        const dl = mL[a] - mL[b], da = mA[a] - mA[b], db = mB[a] - mB[b];
+        return Math.sqrt(dl * dl + da * da + db * db);
+    };
+    // 2. 放大到输出尺寸，平滑边界
     let big = new Int32Array(n);
     for (let y = 0; y < h; y++) {
         const yy = Math.min(sh - 1, Math.floor((y + 0.5) * f));
@@ -658,64 +698,71 @@ function makeLineArt(rgba, w, h, style) {
     }
     for (let s = 0; s < P.smooth; s++)
         big = modeFilter(big, w, h, 2);
-    // 3. 分界线
-    let edge = new Uint8Array(n);
+    // 3. 分界线：按两侧反差决定粗细（每个分界像素都画，保证格子封闭）
+    const cov = new Float32Array(n);
+    const rThin = P.thinRadius * scale, rBold = P.boldRadius * scale;
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             const i = y * w + x;
-            if ((x < w - 1 && big[i] !== big[i + 1]) || (y < h - 1 && big[i] !== big[i + w]))
-                edge[i] = 1;
+            const s = big[i];
+            let d = -1;
+            if (x < w - 1 && big[i + 1] !== s)
+                d = Math.max(d, contrast(s, big[i + 1]));
+            if (y < h - 1 && big[i + w] !== s)
+                d = Math.max(d, contrast(s, big[i + w]));
+            if (d < 0)
+                continue;
+            let t = (d - P.boldFrom) / (P.boldFull - P.boldFrom);
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            stamp(cov, w, h, x, y, rThin + (rBold - rThin) * t);
         }
     }
-    edge = dilate(edge, w, h, P.thickness);
-    // 4. 五官等细节：比周围明显更暗的细小部分（眼睛、眉毛、鼻孔、嘴缝、发丝）画成实心笔触。
+    // 4. 五官、发丝等细节：比周围明显更暗的细小部分，用细笔触画出来。
     //    实心笔触只会让格子变小，不会在格子之间开口子，所以不影响封闭。
     {
         const gray = new Float32Array(n);
         for (let i = 0, j = 0; i < n; i++, j += 4)
             gray[i] = 0.299 * rgba[j] + 0.587 * rgba[j + 1] + 0.114 * rgba[j + 2];
-        const scale = Math.max(w, h) / 960;
         const g1 = gaussianBlur(gray, w, h, 1.4 * scale);
         const g2 = gaussianBlur(gray, w, h, 4.5 * scale);
         const det = new Uint8Array(n);
         for (let i = 0; i < n; i++)
             if (g1[i] - g2[i] < -P.detail)
                 det[i] = 1;
-        const minLen = Math.max(40, Math.round(n * 0.0001));
+        const minLen = Math.max(60, Math.round(n * 0.00012));
         const { labels, sizes } = components(det, w, h, 1, true);
-        for (let i = 0; i < n; i++)
-            if (det[i] && sizes[labels[i]] >= minLen)
-                edge[i] = 1;
+        // 细节笔触沿中心线画细线，暗得越多越粗一点
+        for (let i = 0; i < n; i++) {
+            if (!det[i] || sizes[labels[i]] < minLen)
+                continue;
+            const strength = Math.min(1, (g2[i] - g1[i] - P.detail) / 25);
+            const v = 0.55 + 0.45 * strength;
+            if (v > cov[i])
+                cov[i] = v;
+        }
     }
-    // 5. 漫画风：最暗的格子涂成实心黑（头发、深色衣服、阴影）
-    if (P.darkFill) {
-        const minL = Math.min(...Array.from(centerL));
-        const darkT = Math.min(32, minL + 8);
-        for (let i = 0; i < n; i++)
-            if (segL[big[i]] <= darkT)
-                edge[i] = 1;
+    // 5. 轻微模糊，让线条边缘柔和
+    const soft = gaussianBlur(cov, w, h, 0.6 * scale);
+    const alpha = new Uint8Array(n);
+    const ink = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+        // 分界线中心一定保持为线（cov=1），保证封闭
+        const c = Math.max(soft[i], cov[i] >= 1 ? 1 : 0);
+        let t = (c - 0.2) / 0.6;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const a = Math.round(t * t * (3 - 2 * t) * 255);
+        alpha[i] = a;
+        ink[i] = a >= 128 || cov[i] >= 1 ? 1 : 0;
     }
     // 6. 太小的空白碎块并入线条（点不中的小格子）
     {
         const minArea = Math.max(40, Math.round(n * 0.00015));
-        const { labels, sizes } = components(edge, w, h, 0, false);
+        const { labels, sizes } = components(ink, w, h, 0, false);
         for (let i = 0; i < n; i++)
-            if (labels[i] >= 0 && sizes[labels[i]] < minArea)
-                edge[i] = 1;
-    }
-    // 7. 抗锯齿：模糊后用平滑阶梯函数，线条边缘柔和、圆润
-    const fl = new Float32Array(n);
-    for (let i = 0; i < n; i++)
-        fl[i] = edge[i];
-    const bl = gaussianBlur(fl, w, h, 0.9);
-    const alpha = new Uint8Array(n);
-    const ink = new Uint8Array(n);
-    for (let i = 0; i < n; i++) {
-        let t = (bl[i] - 0.25) / 0.5;
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        const a = Math.round(t * t * (3 - 2 * t) * 255);
-        alpha[i] = a;
-        ink[i] = a >= 128 ? 1 : 0;
+            if (labels[i] >= 0 && sizes[labels[i]] < minArea) {
+                ink[i] = 1;
+                alpha[i] = 255;
+            }
     }
     return { ink, alpha };
 }
@@ -1021,20 +1068,15 @@ $('#tabs').addEventListener('click', (e) => {
 
 // ---------------- 拍照（App 内置取景框，不调用系统相机，不会自动开闪光灯） ----------------
 function viewCamera(v) {
-  const style = state.params.style || Settings.data.style;
   let facing = Settings.data.facing === 'user' ? 'user' : 'environment';
   let stream = null, alive = true, shooting = false;
   v.innerHTML = `
     <div class="cam">
-      <div class="top pad">
-        <div class="seg dark" role="group" aria-label="线条风格">
-          ${STYLE_LIST.map((s) => `<button type="button" data-style="${s.id}" aria-pressed="${s.id === style}">${s.label}</button>`).join('')}
-        </div>
-      </div>
+      <div class="top pad"><span class="cam-title">线稿日记</span></div>
       <div class="viewfinder" id="vf">
         <video id="vid" playsinline muted autoplay></video>
         <div class="cam-msg" id="camMsg" hidden></div>
-        <span class="vf-badge">拍完自动生成「${STYLE_LIST.find((s) => s.id === style).label}」线稿</span>
+        <span class="vf-badge">拍完自动生成线稿</span>
       </div>
       <p class="hint" id="camHint">对准想记录的瞬间，按下快门</p>
       <div class="controls">
@@ -1097,7 +1139,7 @@ function viewCamera(v) {
     ctx.drawImage(video, sx, sy, cw, ch, 0, 0, cw, ch);
     const blob = await new Promise((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.92));
     shooting = false;
-    if (blob) go('result', { file: blob, style: state.params.style || Settings.data.style });
+    if (blob) go('result', { file: blob });
   };
 
   shutter.addEventListener('click', shoot);
@@ -1106,11 +1148,6 @@ function viewCamera(v) {
     Settings.set({ facing });
     start();
   });
-  v.querySelectorAll('[data-style]').forEach((b) => b.addEventListener('click', () => {
-    state.params.style = b.dataset.style;
-    v.querySelectorAll('[data-style]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    $('.vf-badge', v).textContent = `拍完自动生成「${STYLE_LIST.find((s) => s.id === b.dataset.style).label}」线稿`;
-  }));
   const onVis = () => { if (document.hidden) stop(); else if (alive) start(); };
   document.addEventListener('visibilitychange', onVis);
   cleanup = () => { alive = false; stop(); document.removeEventListener('visibilitychange', onVis); };
@@ -1121,7 +1158,7 @@ function onPicked(e) {
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!f) return;
-  go('result', { file: f, style: state.params.style || Settings.data.style });
+  go('result', { file: f });
 }
 $('#albumInput').addEventListener('change', onPicked);
 
@@ -1129,9 +1166,7 @@ $('#albumInput').addEventListener('change', onPicked);
 function viewResult(v) {
   const p = state.params;
   const created = Date.now();
-  let style = p.style;
   let src = null, line = null, busy = true;
-  const cache = {};
   v.innerHTML = `
     <div class="bar pad">
       <button type="button" class="icon-btn" data-back aria-label="重拍">${icon('back')}</button>
@@ -1140,12 +1175,7 @@ function viewResult(v) {
     </div>
     <div class="scroll pad">
       <div class="result-card"><canvas id="rc"></canvas><div class="busy" id="busy"><div class="spinner"></div>正在画线稿…</div></div>
-      <div class="gen-row">
-        <div class="seg" role="group" aria-label="线条风格" id="rs">
-          ${STYLE_LIST.map((s) => `<button type="button" data-style="${s.id}" aria-pressed="${s.id === style}">${s.label}</button>`).join('')}
-        </div>
-      </div>
-      <p class="gen-note">每条线都是封闭的，涂色时颜色只会留在点中的格子里。</p>
+      <p class="gen-note">外轮廓粗线、细节细线，每个格子都是封闭的，涂色只会填满点中的那一格。</p>
       <div style="margin-top:14px"><span class="chip">${icon('cal', 'sm')}${fmtDate(created)} ${fmtTime(created)}</span></div>
       <label class="field" for="noteInput">此刻的感受</label>
       <textarea id="noteInput" maxlength="200" placeholder="写点什么吧：今天看到了什么、想到了什么……"></textarea>
@@ -1174,21 +1204,13 @@ function viewResult(v) {
         try { src = await pixelsFromSource(url, Settings.data.quality === 'high' ? 1280 : WORK_SIZE); }
         finally { URL.revokeObjectURL(url); }
       }
-      if (!cache[style]) cache[style] = makeLineArt(src.rgba, src.w, src.h, style);
-      line = cache[style];
+      line = makeLineArt(src.rgba, src.w, src.h);
       canvas.width = src.w; canvas.height = src.h;
       canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(alphaToRgba(line.alpha).buffer), src.w, src.h), 0, 0);
     } catch (e) {
       toast(e.message || '生成失败');
     } finally { setBusy(false); }
   };
-  $('#rs', v).addEventListener('click', (e) => {
-    const b = e.target.closest('[data-style]');
-    if (!b || busy || b.dataset.style === style) return;
-    style = b.dataset.style;
-    $('#rs', v).querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    generate();
-  });
   const note = $('#noteInput', v);
   note.addEventListener('input', () => { $('#cnt', v).textContent = `${note.value.length} / 200`; });
   $('[data-back]', v).addEventListener('click', () => go('camera'));
@@ -1196,7 +1218,7 @@ function viewResult(v) {
     if (!line) return;
     setBusy(true);
     const blob = await toBlob(rgbaCanvas(alphaToRgba(line.alpha), src.w, src.h));
-    const rec = withUrl({ id: Date.now().toString(36), createdAt: created, note: note.value.trim(), style, w: src.w, h: src.h, colors: {}, progress: 0, line: blob, preview: blob });
+    const rec = withUrl({ id: Date.now().toString(36), createdAt: created, note: note.value.trim(), style: 'mixed', w: src.w, h: src.h, colors: {}, progress: 0, line: blob, preview: blob });
     records.unshift(rec);
     Store.put(rec);
     if (thenColor) go('editor', { id: rec.id, from: 'history' });
@@ -1519,7 +1541,7 @@ function viewRecord(v) {
     <div class="scroll pad"><div class="stack">
       <img class="detail-img" src="${rec.previewUrl}" alt="作品">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span style="font-size:13px;color:var(--muted)">${fmtTime(rec.createdAt)} · ${STYLE_LIST.find((s) => s.id === rec.style).label}线稿</span>${badge(rec.progress)}
+        <span style="font-size:13px;color:var(--muted)">${fmtTime(rec.createdAt)}</span>${badge(rec.progress)}
       </div>
       <label class="field" for="rNote" style="margin:4px 0 0">当时的感受</label>
       <textarea id="rNote" maxlength="200" placeholder="补写一点当时的心情……">${esc(rec.note)}</textarea>
@@ -1578,7 +1600,6 @@ function viewAccount(v) {
       </div>
       <h2 class="group-title">创作</h2>
       <div class="group">
-        <div class="item"><span>默认线稿风格</span>${seg('style', STYLE_LIST.map((x) => [x.id, x.label]), s.style)}</div>
         <div class="item"><span>线稿清晰度</span><small>高清线条更细腻，但生成会慢一些</small>${seg('quality', [['standard', '标准'], ['high', '高清']], s.quality)}</div>
       </div>
       <h2 class="group-title">数据</h2>
