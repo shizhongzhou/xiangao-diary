@@ -49,6 +49,8 @@ android {
 }
 
 dependencies {
+    // 统一 Kotlin 基础库版本，避免 kotlin-stdlib 与旧的 jdk7/jdk8 包重复
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.9.24')
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.webkit:webkit:1.11.0'
 }
