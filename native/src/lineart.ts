@@ -404,6 +404,33 @@ export function makeLineArt(rgba: Uint8Array, w: number, h: number, style: Style
   return ink;
 }
 
+// ---------- AI 画好的线稿 → 干净的遮罩 ----------
+
+/**
+ * 把 AI 生成的黑白线稿二值化：去掉灰色杂点、零星小黑点，
+ * 再把太小的空白碎块并入线条，保证涂色时每个格子都点得中。
+ */
+export function cleanLineArt(rgba: Uint8Array, w: number, h: number): Uint8Array {
+  const n = w * h;
+  const ink = new Uint8Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const lum = 0.299 * rgba[j] + 0.587 * rgba[j + 1] + 0.114 * rgba[j + 2];
+    ink[i] = lum < 150 ? 1 : 0;
+  }
+  {
+    const { labels, sizes } = components(ink, w, h, 1, true);
+    for (let i = 0; i < n; i++) if (labels[i] >= 0 && sizes[labels[i]] < 6) ink[i] = 0;
+  }
+  const minArea = Math.max(20, Math.round(n * 0.00006));
+  {
+    const { labels, sizes } = components(ink, w, h, 0, false);
+    for (let i = 0; i < n; i++) if (labels[i] >= 0 && sizes[labels[i]] < minArea) ink[i] = 1;
+  }
+  for (let x = 0; x < w; x++) { ink[x] = 0; ink[(h - 1) * w + x] = 0; }
+  for (let y = 0; y < h; y++) { ink[y * w] = 0; ink[y * w + w - 1] = 0; }
+  return ink;
+}
+
 // ---------- 线稿 → 填色区域 ----------
 
 export interface Regions {

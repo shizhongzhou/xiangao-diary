@@ -142,6 +142,13 @@ textarea::placeholder { color: var(--muted); }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--ink); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.gen-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 14px; }
+.gen-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); text-align: center; }
+.key-row { display: flex; gap: 8px; }
+.key-row input, .text-in {
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1.5px solid #D6D3CB;
+  background: var(--white); font-size: 16px; font-family: ui-monospace, Menlo, monospace;
+}
 .footer { border-top: 1px solid var(--line); padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--paper); }
 
 /* 上色编辑器 */
@@ -686,6 +693,41 @@ function makeLineArt(rgba, w, h, style) {
     }
     return ink;
 }
+// ---------- AI 画好的线稿 → 干净的遮罩 ----------
+/**
+ * 把 AI 生成的黑白线稿二值化：去掉灰色杂点、零星小黑点，
+ * 再把太小的空白碎块并入线条，保证涂色时每个格子都点得中。
+ */
+function cleanLineArt(rgba, w, h) {
+    const n = w * h;
+    const ink = new Uint8Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+        const lum = 0.299 * rgba[j] + 0.587 * rgba[j + 1] + 0.114 * rgba[j + 2];
+        ink[i] = lum < 150 ? 1 : 0;
+    }
+    {
+        const { labels, sizes } = components(ink, w, h, 1, true);
+        for (let i = 0; i < n; i++)
+            if (labels[i] >= 0 && sizes[labels[i]] < 6)
+                ink[i] = 0;
+    }
+    const minArea = Math.max(20, Math.round(n * 0.00006));
+    {
+        const { labels, sizes } = components(ink, w, h, 0, false);
+        for (let i = 0; i < n; i++)
+            if (labels[i] >= 0 && sizes[labels[i]] < minArea)
+                ink[i] = 1;
+    }
+    for (let x = 0; x < w; x++) {
+        ink[x] = 0;
+        ink[(h - 1) * w + x] = 0;
+    }
+    for (let y = 0; y < h; y++) {
+        ink[y * w] = 0;
+        ink[y * w + w - 1] = 0;
+    }
+    return ink;
+}
 /**
  * 把线稿切成一个个可以点击填色的格子。
  * 先把线条再加粗 1 像素当“墙”，补上细小的缺口，避免颜色漏出去；
@@ -887,7 +929,7 @@ const Store = {
 };
 
 const Settings = {
-  data: { nickname: '', style: 'bold', quality: 'standard' },
+  data: { nickname: '', style: 'bold', quality: 'standard', engine: 'ai', openaiKey: '', model: 'gpt-image-2' },
   load() { try { Object.assign(this.data, JSON.parse(localStorage.getItem('xiangao-settings') || '{}')); } catch (e) { /* 用默认 */ } },
   set(patch) { Object.assign(this.data, patch); try { localStorage.setItem('xiangao-settings', JSON.stringify(this.data)); } catch (e) { /* 忽略 */ } },
 };
@@ -944,6 +986,77 @@ async function maskFromBlob(blob) {
 
 // 第一次打开时放一张示例线稿，方便直接试涂色
 const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 360" width="600" height="720"><rect width="300" height="360" fill="#fff"/><g fill="none" stroke="#141414" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="238" cy="58" r="22"/><path d="M226 30l-4-10M250 30l4-10M266 50l10-4M210 50l-10-4"/><path d="M26 78c2-14 18-18 26-8 6-12 26-12 30 4 12-2 18 10 10 16H30c-10 0-12-10-4-12z"/><path d="M16 316V118l55-32 55 32v198z"/><path d="M34 134h26v30H34zM47 134v30M34 149h26M82 134h26v30H82zM95 134v30M82 149h26M34 182h26v30H34zM82 182h26v30H82z"/><path d="M20 232h102l-10 24H30z"/><path d="M40 232l-4 24M60 232l-2 24M82 232l2 24M102 232l4 24"/><path d="M56 266h30v50H56z"/><path d="M146 316V146h138v170z"/><path d="M146 168h138M188 151h56v12h-56z"/><path d="M162 226v-24a17 17 0 0 1 34 0v24zM234 226v-24a17 17 0 0 1 34 0v24z"/><path d="M166 248h100v40H166zM199 248v40M233 248v40"/><path d="M136 316v-36"/><circle cx="136" cy="262" r="20" fill="#fff"/><path d="M128 258c4-6 12-6 16 0"/><path d="M4 316h292"/><circle cx="196" cy="336" r="16"/><circle cx="254" cy="336" r="16"/><path d="M196 336l20-26h26l12 26M216 310l12 26 14-26M210 304h12M242 310l-4-10h10"/></g></svg>`;
+
+// ---------------- AI 动漫线稿（OpenAI 图像编辑接口） ----------------
+const AI_BASE_PROMPT = [
+  'Redraw this photo as Japanese anime / manga black-and-white line art, like a page from a manga or an official anime coloring book.',
+  'Turn every person into an anime character: anime-style face with large expressive eyes, small simplified nose and mouth, clean jawline, hair drawn as flowing grouped strands with sharp tips.',
+  'Keep the same pose, expression, framing, clothing and the main background objects, so the picture is clearly the same scene, but simplify and stylize everything the way an anime artist would.',
+  'Pure black ink lines on a pure white background. No grey, no gradients, no screentone, no colour, no text, no signature, no border.',
+  'Use confident clean strokes with varied line weight. Every shape must be a closed outline so each area can be filled with colour.',
+].join(' ');
+
+const AI_STYLE_PROMPT = {
+  thin: 'Use fine, delicate pen lines with more small details, like a detailed shoujo manga illustration.',
+  bold: 'Use bold, smooth outlines with fewer details, like a cheerful anime coloring book page.',
+  comic: 'Use strong shonen manga inking: thick outlines, and fill hair and the darkest shadows with solid black.',
+};
+
+function aiErrorText(status, msg) {
+  const m = msg || '';
+  if (status === 401) return 'API Key 不正确或已失效。请到「账户」页重新填写。';
+  if (status === 429) return /quota|billing/i.test(m) ? 'OpenAI 账号余额不足，请先在 OpenAI 后台充值。' : '请求太频繁了，等一会儿再试。';
+  if (status === 403) return 'OpenAI 账号没有使用这个图像模型的权限（可能需要先在 OpenAI 后台完成组织验证）。原话：' + m;
+  if (status === 400 && /safety|moderation|policy/i.test(m)) return 'OpenAI 的安全审核拦下了这张照片，换一张试试。';
+  if (status === 404) return '找不到这个模型，请到「账户」页检查模型名称。原话：' + m;
+  return `OpenAI 返回错误（${status}）：${m || '未知错误'}`;
+}
+
+async function aiLineArt(file, style) {
+  const s = Settings.data;
+  // 先把照片缩小成 JPEG，上传更快
+  const url = URL.createObjectURL(file);
+  let img;
+  try { img = await loadImg(url); } finally { URL.revokeObjectURL(url); }
+  const sw = img.naturalWidth, sh = img.naturalHeight;
+  const k = Math.min(1, 1536 / Math.max(sw, sh));
+  const c = canvasOf(Math.round(sw * k), Math.round(sh * k));
+  const cx = c.getContext('2d');
+  cx.fillStyle = '#fff';
+  cx.fillRect(0, 0, c.width, c.height);
+  cx.drawImage(img, 0, 0, c.width, c.height);
+  const photo = await new Promise((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.9));
+  const size = sh > sw * 1.15 ? '1024x1536' : sw > sh * 1.15 ? '1536x1024' : '1024x1024';
+
+  const fd = new FormData();
+  fd.append('model', s.model || 'gpt-image-2');
+  fd.append('image', photo, 'photo.jpg');
+  fd.append('prompt', `${AI_BASE_PROMPT} ${AI_STYLE_PROMPT[style] || ''}`);
+  fd.append('size', size);
+  fd.append('quality', s.quality === 'high' ? 'high' : 'medium');
+  fd.append('n', '1');
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 180000);
+  let res, json;
+  try {
+    res = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${s.openaiKey.trim()}` },
+      body: fd,
+      signal: ctrl.signal,
+    });
+    json = await res.json().catch(() => null);
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('等了 3 分钟还没有返回，网络可能太慢，再试一次。');
+    throw new Error('连不上 OpenAI。请检查网络：在中国大陆需要能访问国外网站的网络。');
+  } finally { clearTimeout(timer); }
+  if (!res.ok) throw new Error(aiErrorText(res.status, json && json.error && json.error.message));
+  const b64 = json && json.data && json.data[0] && json.data[0].b64_json;
+  if (!b64) throw new Error('OpenAI 没有返回图片，再试一次。');
+  const { w, h, rgba } = await pixelsFromSource(`data:image/png;base64,${b64}`, 1200);
+  return { w, h, ink: cleanLineArt(rgba, w, h) };
+}
 
 async function seedSample() {
   try {
@@ -1031,7 +1144,9 @@ function viewResult(v) {
   const p = state.params;
   const created = Date.now();
   let style = p.style;
-  let src = null, ink = null, busy = true;
+  let engine = Settings.data.engine === 'ai' && Settings.data.openaiKey ? 'ai' : 'local';
+  let src = null, dims = null, ink = null, busy = true;
+  const aiCache = {};
   v.innerHTML = `
     <div class="bar pad">
       <button type="button" class="icon-btn" data-back aria-label="重拍">${icon('back')}</button>
@@ -1039,12 +1154,17 @@ function viewResult(v) {
       <span style="width:44px"></span>
     </div>
     <div class="scroll pad">
-      <div class="result-card"><canvas id="rc"></canvas><div class="busy" id="busy"><div class="spinner"></div>正在生成线稿…</div></div>
-      <div style="display:flex;justify-content:center;margin-top:14px">
+      <div class="result-card"><canvas id="rc"></canvas><div class="busy" id="busy"><div class="spinner"></div><span id="busyText">正在生成线稿…</span></div></div>
+      <div class="gen-row">
+        <div class="seg" role="group" aria-label="生成方式" id="re">
+          <button type="button" data-engine="ai" aria-pressed="${engine === 'ai'}">AI 动漫</button>
+          <button type="button" data-engine="local" aria-pressed="${engine === 'local'}">本地描线</button>
+        </div>
         <div class="seg" role="group" aria-label="线条风格" id="rs">
           ${STYLE_LIST.map((s) => `<button type="button" data-style="${s.id}" aria-pressed="${s.id === style}">${s.label}</button>`).join('')}
         </div>
       </div>
+      <p class="gen-note" id="genNote"></p>
       <div style="margin-top:14px"><span class="chip">${icon('cal', 'sm')}${fmtDate(created)} ${fmtTime(created)}</span></div>
       <label class="field" for="noteInput">此刻的感受</label>
       <textarea id="noteInput" maxlength="200" placeholder="写点什么吧：今天看到了什么、想到了什么……"></textarea>
@@ -1064,22 +1184,62 @@ function viewResult(v) {
     $('#saveOnly', v).disabled = b;
     $('#saveColor', v).disabled = b;
   };
+  const show = (mask, w, h) => {
+    ink = mask;
+    dims = { w, h };
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(maskToRgba(mask).buffer), w, h), 0, 0);
+  };
+  const setNote = () => {
+    $('#genNote', v).textContent = engine === 'ai'
+      ? 'AI 会把照片重新画成日本动漫风格的黑白线稿。每次生成都会调用你的 OpenAI 账号（约 20~60 秒）。'
+      : '本地描线：在手机上直接描出照片的轮廓，免费、几秒钟，但不会画成动漫风格。';
+  };
   const generate = async () => {
     setBusy(true);
+    $('#busyText', v).textContent = engine === 'ai' ? 'AI 正在把照片画成动漫线稿…约 20~60 秒' : '正在生成线稿…';
     await wait(40);
     try {
-      if (!src) {
-        const url = URL.createObjectURL(p.file);
-        try { src = await pixelsFromSource(url, Settings.data.quality === 'high' ? 1200 : WORK_SIZE); }
-        finally { URL.revokeObjectURL(url); }
+      if (engine === 'ai') {
+        if (!aiCache[style]) aiCache[style] = await aiLineArt(p.file, style);
+        const a = aiCache[style];
+        show(a.ink, a.w, a.h);
+      } else {
+        if (!src) {
+          const url = URL.createObjectURL(p.file);
+          try { src = await pixelsFromSource(url, Settings.data.quality === 'high' ? 1200 : WORK_SIZE); }
+          finally { URL.revokeObjectURL(url); }
+        }
+        show(makeLineArt(src.rgba, src.w, src.h, style), src.w, src.h);
       }
-      ink = makeLineArt(src.rgba, src.w, src.h, style);
-      canvas.width = src.w; canvas.height = src.h;
-      canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(maskToRgba(ink).buffer), src.w, src.h), 0, 0);
     } catch (e) {
-      toast(e.message || '生成失败');
+      if (engine === 'ai') {
+        openOverlay(`<h2>AI 线稿没有生成成功</h2><p>${esc(e.message || String(e))}</p>
+          <button type="button" class="btn" id="useLocal">先用本地描线</button>
+          <button type="button" class="btn outline" id="retryAi">再试一次</button>
+          <button type="button" class="btn outline" data-close>关闭</button>`);
+        $('#useLocal').addEventListener('click', () => { closeOverlay(); setEngine('local'); });
+        $('#retryAi').addEventListener('click', () => { closeOverlay(); generate(); });
+      } else toast(e.message || '生成失败');
     } finally { setBusy(false); }
   };
+  const setEngine = (en) => {
+    engine = en;
+    $('#re', v).querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.engine === en)));
+    setNote();
+    generate();
+  };
+  $('#re', v).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-engine]');
+    if (!b || busy || b.dataset.engine === engine) return;
+    if (b.dataset.engine === 'ai' && !Settings.data.openaiKey) {
+      openOverlay(`<h2>先填写 OpenAI API Key</h2><p>AI 动漫线稿需要用你自己的 OpenAI 账号。到「账户」页的「AI 线稿」里填入 API Key，只保存在这台手机上。</p>
+        <button type="button" class="btn" id="goKey">去填写</button><button type="button" class="btn outline" data-close>取消</button>`);
+      $('#goKey').addEventListener('click', () => { closeOverlay(); go('account'); });
+      return;
+    }
+    setEngine(b.dataset.engine);
+  });
   $('#rs', v).addEventListener('click', (e) => {
     const b = e.target.closest('[data-style]');
     if (!b || busy || b.dataset.style === style) return;
@@ -1087,14 +1247,15 @@ function viewResult(v) {
     $('#rs', v).querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
     generate();
   });
+  setNote();
   const note = $('#noteInput', v);
   note.addEventListener('input', () => { $('#cnt', v).textContent = `${note.value.length} / 200`; });
   $('[data-back]', v).addEventListener('click', () => go('camera'));
   const save = async (thenColor) => {
     if (!ink) return;
     setBusy(true);
-    const blob = await toBlob(rgbaCanvas(maskToRgba(ink), src.w, src.h));
-    const rec = withUrl({ id: Date.now().toString(36), createdAt: created, note: note.value.trim(), style, w: src.w, h: src.h, colors: {}, progress: 0, line: blob, preview: blob });
+    const blob = await toBlob(rgbaCanvas(maskToRgba(ink), dims.w, dims.h));
+    const rec = withUrl({ id: Date.now().toString(36), createdAt: created, note: note.value.trim(), style, engine, w: dims.w, h: dims.h, colors: {}, progress: 0, line: blob, preview: blob });
     records.unshift(rec);
     Store.put(rec);
     if (thenColor) go('editor', { id: rec.id, from: 'history' });
@@ -1477,7 +1638,26 @@ function viewAccount(v) {
       <h2 class="group-title">创作</h2>
       <div class="group">
         <div class="item"><span>默认线稿风格</span>${seg('style', STYLE_LIST.map((x) => [x.id, x.label]), s.style)}</div>
-        <div class="item"><span>线稿清晰度</span><small>高清线条更细腻，但生成会慢一些</small>${seg('quality', [['standard', '标准'], ['high', '高清']], s.quality)}</div>
+        <div class="item"><span>线稿清晰度</span><small>高清线条更细腻，但生成会慢一些（AI 模式下费用也更高）</small>${seg('quality', [['standard', '标准'], ['high', '高清']], s.quality)}</div>
+      </div>
+      <h2 class="group-title">AI 动漫线稿（OpenAI）</h2>
+      <div class="group">
+        <div class="item"><span>默认生成方式</span>${seg('engine', [['ai', 'AI 动漫'], ['local', '本地描线']], s.engine)}</div>
+        <div class="item" style="align-items:stretch">
+          <label for="aiKey">OpenAI API Key</label>
+          <small style="margin-top:-4px">在 platform.openai.com 的 API keys 页面创建，以 sk- 开头。只保存在这台手机的浏览器里，不会上传到 GitHub。</small>
+          <div class="key-row">
+            <input id="aiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-..." value="${esc(s.openaiKey)}">
+            <button type="button" class="btn outline" id="aiKeySave" style="min-height:44px">保存</button>
+          </div>
+          <span id="aiKeyState" style="font-size:13px;color:var(--muted)">${s.openaiKey ? '已保存 Key（' + esc(s.openaiKey.slice(0, 5)) + '…' + esc(s.openaiKey.slice(-4)) + '）' : '还没有填写'}</span>
+        </div>
+        <div class="item" style="align-items:stretch">
+          <label for="aiModel">图像模型</label>
+          <small style="margin-top:-4px">默认 gpt-image-2。一般不用改。</small>
+          <input id="aiModel" class="text-in" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.model)}">
+        </div>
+        <div class="item"><small style="margin:0;line-height:1.6">使用 AI 时，照片会发送给 OpenAI 处理，费用从你的 OpenAI 账号扣除。</small></div>
       </div>
       <h2 class="group-title">数据</h2>
       <div class="group">
@@ -1489,6 +1669,15 @@ function viewAccount(v) {
       <h2 class="group-title">关于</h2>
       <div class="group"><div class="item inline"><span>线稿日记 · 网页测试版</span><span style="color:var(--muted);font-size:14px">1.0</span></div></div>
     </div>`;
+  const keyIn = $('#aiKey', v);
+  $('#aiKeySave', v).addEventListener('click', () => {
+    const k = keyIn.value.trim();
+    Settings.set({ openaiKey: k });
+    $('#aiKeyState', v).textContent = k ? `已保存 Key（${k.slice(0, 5)}…${k.slice(-4)}）` : '还没有填写';
+    toast(k ? '已保存' : '已清除 Key');
+  });
+  const modelIn = $('#aiModel', v);
+  modelIn.addEventListener('change', () => { Settings.set({ model: modelIn.value.trim() || 'gpt-image-2' }); toast('已保存'); });
   const nick = $('#nick', v);
   nick.addEventListener('change', () => { Settings.set({ nickname: nick.value.trim() }); $('#av', v).textContent = (nick.value.trim() || '我').slice(0, 1); });
   v.querySelectorAll('[data-set]').forEach((g) => g.addEventListener('click', (e) => {
