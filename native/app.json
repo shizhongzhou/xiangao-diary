@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "线稿日记",
+    "slug": "xiangao-diary",
+    "version": "1.0.0",
+    "scheme": "xiangao",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.shi.xiangaodiary"
+    },
+    "android": {
+      "package": "com.shi.xiangaodiary"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "线稿日记需要使用相机，把你拍下的瞬间变成线稿。"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "线稿日记需要读取相册，把已有的照片变成线稿。"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

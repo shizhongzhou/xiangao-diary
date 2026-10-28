@@ -1,0 +1,1539 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>线稿日记</title>
+<meta name="description" content="拍照生成线稿，写下感受，点格子涂色。">
+<meta name="theme-color" content="#FBFAF7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="线稿日记">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="manifest" href="manifest.json">
+<style>
+body { margin: 0; font-size: 14px; }
+[hidden] { display: none !important; }
+img { max-width: 100%; }
+#app { padding-top: env(safe-area-inset-top, 0px); }
+</style>
+</head>
+<body>
+<style>
+/* 布局：一屏手机 App —— 顶部标题、中间内容滚动、底部固定四个标签。纸白底、墨黑粗描边、彩色色块 */
+:root {
+  --paper: #FBFAF7;
+  --ink: #141414;
+  --ink-soft: #3A3A3A;
+  --muted: #6B6B6B;
+  --line: #E4E2DC;
+  --soft: #EFEDE7;
+  --white: #FFFFFF;
+  --accent: #FF5B3A;
+  --dark: #0E0E0E;
+  --dark-soft: #1F1F1F;
+  --tint-orange: #FFE4D9;
+  --tint-green: #DDF0D3;
+  --tint-blue: #DCEFF7;
+  --danger: #C2361B;
+  --font: -apple-system, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --tab-h: 64px;
+  color-scheme: light;
+}
+html, body { height: 100%; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+* { box-sizing: border-box; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+#app { height: 100%; display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; position: relative; }
+#view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.pad { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* 底部标签栏 */
+#tabs {
+  flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line); background: var(--paper);
+  padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+}
+#tabs button {
+  border: 0; background: none; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--muted); font-size: 11px; font-weight: 600;
+}
+#tabs button[aria-current="page"] { color: var(--ink); font-weight: 800; }
+#tabs.dark { background: var(--dark); border-top-color: #262626; }
+#tabs.dark button { color: #8A8A8A; }
+#tabs.dark button[aria-current="page"] { color: var(--white); }
+
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.sm { width: 18px; height: 18px; stroke-width: 2; }
+
+/* 通用部件 */
+.h1 { margin: 0; font-size: 30px; font-weight: 900; letter-spacing: -0.5px; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.head { padding-block: 14px 4px; }
+.bar { display: flex; align-items: center; gap: 4px; padding-block: 8px; }
+.bar .title { flex: 1 1 auto; min-width: 0; text-align: center; font-size: 17px; font-weight: 800; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn {
+  width: 44px; height: 44px; border-radius: 22px; border: 0; background: transparent; color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 0;
+}
+.icon-btn:disabled { opacity: .3; }
+.btn {
+  min-height: 52px; border-radius: 16px; border: 2px solid var(--ink); background: var(--ink); color: var(--white);
+  font-size: 16px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 18px;
+}
+.btn.outline { background: transparent; color: var(--ink); }
+.btn.danger { background: var(--danger); border-color: var(--danger); }
+.btn:disabled { opacity: .4; }
+.row-btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.seg { display: inline-flex; border-radius: 999px; background: var(--soft); padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; min-height: 40px; padding: 0 16px; border-radius: 999px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--white); color: var(--ink); font-weight: 800; box-shadow: 0 1px 2px rgba(20,20,20,.12); }
+.seg.dark { background: var(--dark-soft); }
+.seg.dark button { color: #BDBDBD; }
+.seg.dark button[aria-pressed="true"] { background: var(--white); color: var(--dark); }
+.chip { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 999px; background: var(--soft); font-size: 13px; font-weight: 600; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; border: 1.5px solid transparent; }
+.badge.todo { border-color: var(--ink); }
+.badge.doing { background: var(--tint-orange); }
+.badge.done { background: var(--tint-green); }
+.progress { width: 72px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; flex: none; }
+.progress > i { display: block; height: 100%; background: var(--ink); }
+label.field { display: block; font-size: 14px; font-weight: 800; margin: 18px 0 8px; }
+textarea {
+  width: 100%; min-height: 108px; resize: none; padding: 14px 16px; border-radius: 16px; border: 1.5px solid #D6D3CB; background: var(--white);
+  font-size: 16px; line-height: 1.6;
+}
+textarea::placeholder { color: var(--muted); }
+.counter { text-align: right; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px; text-align: center; color: var(--muted); line-height: 1.6; }
+.empty svg.i { width: 40px; height: 40px; }
+
+/* 拍照页（深色） */
+.cam { flex: 1; display: flex; flex-direction: column; background: var(--dark); color: var(--white); }
+.cam .top { display: flex; align-items: center; justify-content: center; padding-block: 12px; }
+.viewfinder { flex: 1 1 auto; min-height: 0; margin: 0 12px; border-radius: 28px; background: var(--white); position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.viewfinder img { width: 100%; height: 100%; object-fit: cover; }
+.vf-badge { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--dark); font-size: 12px; font-weight: 600; color: var(--white); }
+.vf-badge::before { content: ""; width: 8px; height: 8px; border-radius: 4px; background: var(--accent); }
+.cam .hint { text-align: center; color: #A3A3A3; font-size: 13px; margin: 14px 0 0; }
+.cam .controls { display: flex; align-items: center; justify-content: space-between; padding: 16px 40px 18px; }
+.round { width: 54px; height: 54px; border-radius: 27px; background: var(--dark-soft); color: var(--white); display: inline-flex; align-items: center; justify-content: center; }
+.shutter { width: 82px; height: 82px; border-radius: 41px; border: 4px solid var(--white); display: inline-flex; align-items: center; justify-content: center; }
+.shutter::after { content: ""; width: 64px; height: 64px; border-radius: 32px; background: var(--white); transition: transform .12s; }
+.shutter:active::after { transform: scale(.9); }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* 生成结果 */
+.result-card { height: min(52vh, 380px); border-radius: 24px; border: 2px solid var(--ink); background: var(--white); position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.result-card canvas { max-width: 100%; max-height: 100%; }
+.busy { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(255,255,255,.88); font-weight: 700; }
+.spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--ink); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.footer { border-top: 1px solid var(--line); padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--paper); }
+
+/* 上色编辑器 */
+.stage { flex: 1 1 auto; min-height: 0; position: relative; background: var(--white); border-block: 1px solid var(--line); overflow: hidden; touch-action: none; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+.stage .tip { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--white); font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; white-space: nowrap; pointer-events: none; }
+.zoom-btn { position: absolute; left: 12px; bottom: 12px; min-height: 36px; padding: 0 10px; border-radius: 8px; border: 1.5px solid var(--ink); background: var(--white); font-size: 12px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; }
+.done-btn { min-height: 40px; padding: 0 14px; border-radius: 999px; border: 0; background: var(--ink); color: var(--white); font-weight: 800; font-size: 14px; display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
+.palette-sheet { padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 10px; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cur { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 15px; }
+.cur i { width: 28px; height: 28px; border-radius: 14px; border: 2px solid var(--ink); display: block; }
+.swatches { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.swatches button { height: 42px; border-radius: 12px; border: 1px solid rgba(20,20,20,.12); padding: 0; }
+.swatches button[aria-pressed="true"] { border: 3px solid var(--ink); box-shadow: inset 0 0 0 2px var(--white); }
+.eraser { min-height: 42px; border-radius: 12px; border: 1.5px solid var(--ink); background: transparent; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.eraser[aria-pressed="true"] { background: var(--ink); color: var(--white); }
+
+/* 列表 */
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-block: 16px; }
+.tile { border: 1.5px solid var(--ink); border-radius: 18px; overflow: hidden; background: var(--white); padding: 0; text-align: left; display: flex; flex-direction: column; }
+.tile img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-bottom: 1.5px solid var(--ink); background: var(--white); }
+.tile .meta { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.tile .d { font-size: 13px; font-weight: 800; }
+.tile .p { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.tabs2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 4px; border-radius: 14px; background: var(--soft); margin-top: 14px; }
+.tabs2 button { border: 0; background: transparent; min-height: 40px; border-radius: 10px; color: var(--muted); font-weight: 600; }
+.tabs2 button[aria-selected="true"] { background: var(--white); color: var(--ink); font-weight: 800; }
+.list { display: flex; flex-direction: column; gap: 14px; padding-block: 16px 24px; }
+.card { display: flex; gap: 14px; padding: 12px; border-radius: 20px; border: 1.5px solid var(--ink); background: var(--white); text-align: left; width: 100%; }
+.card img { width: 104px; height: 124px; object-fit: cover; border-radius: 12px; border: 1.5px solid var(--ink); flex: none; background: var(--white); }
+.card .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.card .date { font-size: 12px; color: var(--muted); }
+.card .note { font-size: 14px; line-height: 1.5; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.card .note.none { color: var(--muted); }
+.card .foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card .go { font-size: 13px; font-weight: 800; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.cal-head h2 { margin: 0; font-size: 17px; }
+.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.week span { text-align: center; font-size: 12px; color: var(--muted); padding-block: 6px; }
+.day { height: 46px; border-radius: 12px; border: 0; background: transparent; position: relative; overflow: hidden; padding: 0; font-size: 14px; color: var(--ink-soft); }
+.day.has { border: 1.5px solid var(--ink); }
+.day.has img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.day b { position: relative; font-weight: 600; }
+.day.has b { background: rgba(255,255,255,.88); padding: 0 4px; border-radius: 6px; font-weight: 900; color: var(--ink); }
+.day.today { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.day.sel { box-shadow: inset 0 0 0 2.5px var(--ink); }
+
+/* 详情 */
+.detail-img { width: 100%; max-height: 56vh; object-fit: contain; border-radius: 20px; border: 2px solid var(--ink); background: var(--white); display: block; }
+.stack { display: flex; flex-direction: column; gap: 12px; padding-block: 8px 28px; }
+
+/* 账户 */
+.profile { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 20px; border: 1.5px solid var(--ink); background: var(--white); }
+.avatar { width: 64px; height: 64px; border-radius: 32px; border: 2px solid var(--ink); background: #FFD966; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 900; flex: none; }
+.profile input { border: 0; background: transparent; font-size: 18px; font-weight: 800; width: 100%; padding: 4px 0; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stats div { padding: 14px 12px; border-radius: 16px; }
+.stats b { display: block; font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.stats span { font-size: 12px; color: var(--ink-soft); }
+.group-title { margin: 18px 4px 8px; font-size: 13px; font-weight: 800; color: var(--muted); }
+.group { border-radius: 18px; background: var(--white); border: 1px solid var(--line); overflow: hidden; }
+.group .item { padding: 14px 16px; border-bottom: 1px solid var(--soft); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.group .item:last-child { border-bottom: 0; }
+.group .item.inline { flex-direction: row; align-items: center; justify-content: space-between; min-height: 56px; }
+.item small { color: var(--muted); font-size: 12px; margin-top: -6px; }
+.link-danger { border: 0; background: none; color: var(--danger); font-size: 15px; padding: 0; min-height: 28px; }
+
+/* 底部弹层 */
+#overlay { position: fixed; inset: 0; background: rgba(14,14,14,.5); z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
+#overlay .panel {
+  width: 100%; max-width: 560px; background: var(--paper); border-radius: 24px 24px 0 0;
+  padding: 20px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  display: flex; flex-direction: column; gap: 12px; max-height: 92%; overflow-y: auto;
+}
+#overlay h2 { margin: 0; font-size: 18px; }
+#overlay p { margin: 0; color: var(--muted); line-height: 1.6; font-size: 14px; }
+#overlay .save-img { width: 100%; border-radius: 16px; border: 2px solid var(--ink); background: var(--white); -webkit-touch-callout: default; }
+#toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--white); padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 700; z-index: 60; white-space: nowrap; }
+</style>
+
+<div id="app">
+  <div id="view"></div>
+  <nav id="tabs" aria-label="主导航"></nav>
+</div>
+<div id="overlay" hidden></div>
+<div id="toast" role="status" hidden></div>
+<input id="camInput" class="vh" type="file" accept="image/*" capture="environment" aria-label="拍照">
+<input id="albumInput" class="vh" type="file" accept="image/*" aria-label="从相册选择照片">
+
+<script>
+/**
+ * 照片 → 线稿，以及线稿 → 可填色区域。
+ * 纯 TypeScript，不依赖任何原生模块，所有运算都在手机本地完成。
+ */
+const STYLE_LIST = [
+    { id: 'thin', label: '细线' },
+    { id: 'bold', label: '粗线' },
+    { id: 'comic', label: '漫画' },
+];
+const PARAMS = {
+    thin: { colors: 8, colorSigma: 2.2, sigma: 1.4, highPct: 0.86, thickness: 1, darkFill: false },
+    bold: { colors: 6, colorSigma: 3.0, sigma: 2.0, highPct: 0.92, thickness: 2, darkFill: false },
+    comic: { colors: 5, colorSigma: 3.4, sigma: 2.2, highPct: 0.94, thickness: 2, darkFill: true },
+};
+/** 处理时图片的最长边。越大越清晰，但越慢。 */
+const WORK_SIZE = 800;
+// ---------- 基础工具 ----------
+function toGray(rgba, n) {
+    const g = new Float32Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+        g[i] = 0.299 * rgba[j] + 0.587 * rgba[j + 1] + 0.114 * rgba[j + 2];
+    }
+    return g;
+}
+function gaussianBlur(src, w, h, sigma) {
+    const r = Math.max(1, Math.ceil(sigma * 2.5));
+    const k = new Float32Array(2 * r + 1);
+    let sum = 0;
+    for (let i = -r; i <= r; i++) {
+        const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+        k[i + r] = v;
+        sum += v;
+    }
+    for (let i = 0; i < k.length; i++)
+        k[i] /= sum;
+    const tmp = new Float32Array(w * h);
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+        const row = y * w;
+        for (let x = 0; x < w; x++) {
+            let acc = 0;
+            for (let i = -r; i <= r; i++) {
+                let xx = x + i;
+                if (xx < 0)
+                    xx = 0;
+                else if (xx >= w)
+                    xx = w - 1;
+                acc += src[row + xx] * k[i + r];
+            }
+            tmp[row + x] = acc;
+        }
+    }
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            let acc = 0;
+            for (let i = -r; i <= r; i++) {
+                let yy = y + i;
+                if (yy < 0)
+                    yy = 0;
+                else if (yy >= h)
+                    yy = h - 1;
+                acc += tmp[yy * w + x] * k[i + r];
+            }
+            out[y * w + x] = acc;
+        }
+    }
+    return out;
+}
+/** 正方形 + 十字交替膨胀，近似圆形笔刷。 */
+function dilate(mask, w, h, radius) {
+    let cur = mask;
+    for (let it = 0; it < radius; it++) {
+        const square = it % 2 === 0;
+        const next = new Uint8Array(cur);
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = y * w + x;
+                if (cur[i])
+                    continue;
+                const l = x > 0 && cur[i - 1];
+                const rr = x < w - 1 && cur[i + 1];
+                const u = y > 0 && cur[i - w];
+                const d = y < h - 1 && cur[i + w];
+                let hit = l || rr || u || d;
+                if (!hit && square) {
+                    hit =
+                        (x > 0 && y > 0 && cur[i - w - 1]) ||
+                            (x < w - 1 && y > 0 && cur[i - w + 1]) ||
+                            (x > 0 && y < h - 1 && cur[i + w - 1]) ||
+                            (x < w - 1 && y < h - 1 && cur[i + w + 1]);
+                }
+                if (hit)
+                    next[i] = 1;
+            }
+        }
+        cur = next;
+    }
+    return cur;
+}
+/** 给 value===target 的像素做 4 连通标记，返回标签和每块大小。 */
+function components(mask, w, h, target, eight) {
+    const n = w * h;
+    const labels = new Int32Array(n).fill(-1);
+    const sizes = [];
+    const stack = new Int32Array(n);
+    let next = 0;
+    for (let s = 0; s < n; s++) {
+        if (mask[s] !== target || labels[s] !== -1)
+            continue;
+        const id = next++;
+        let sp = 0;
+        stack[sp++] = s;
+        labels[s] = id;
+        let count = 0;
+        while (sp > 0) {
+            const i = stack[--sp];
+            count++;
+            const x = i % w;
+            const y = (i - x) / w;
+            for (let dy = -1; dy <= 1; dy++) {
+                const yy = y + dy;
+                if (yy < 0 || yy >= h)
+                    continue;
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0)
+                        continue;
+                    if (!eight && dx !== 0 && dy !== 0)
+                        continue;
+                    const xx = x + dx;
+                    if (xx < 0 || xx >= w)
+                        continue;
+                    const j = yy * w + xx;
+                    if (mask[j] === target && labels[j] === -1) {
+                        labels[j] = id;
+                        stack[sp++] = j;
+                    }
+                }
+            }
+        }
+        sizes.push(count);
+    }
+    return { labels, sizes };
+}
+function percentile(values, count, p) {
+    // 直方图近似，避免对几十万个数排序
+    let max = 0;
+    for (let i = 0; i < count; i++)
+        if (values[i] > max)
+            max = values[i];
+    if (max === 0)
+        return 0;
+    const bins = 1024;
+    const hist = new Uint32Array(bins);
+    for (let i = 0; i < count; i++)
+        hist[Math.min(bins - 1, Math.floor((values[i] / max) * bins))]++;
+    const target = p * count;
+    let acc = 0;
+    for (let b = 0; b < bins; b++) {
+        acc += hist[b];
+        if (acc >= target)
+            return ((b + 0.5) / bins) * max;
+    }
+    return max;
+}
+// ---------- 色块归并（保证边界封闭） ----------
+/** 把模糊后的照片归并成 k 种颜色，返回每个像素的色块编号。 */
+function posterize(rgba, w, h, k, sigma) {
+    const n = w * h;
+    const ch = [0, 1, 2].map((c) => {
+        const a = new Float32Array(n);
+        for (let i = 0; i < n; i++)
+            a[i] = rgba[i * 4 + c];
+        return gaussianBlur(a, w, h, sigma);
+    });
+    const [R, G, B] = ch;
+    // k-means（在抽样像素上训练）
+    const step = Math.max(1, Math.floor(n / 20000));
+    const sample = [];
+    for (let i = 0; i < n; i += step)
+        sample.push(i);
+    sample.sort((a, b) => R[a] + G[a] + B[a] - (R[b] + G[b] + B[b]));
+    const cr = new Float32Array(k), cg = new Float32Array(k), cb = new Float32Array(k);
+    for (let c = 0; c < k; c++) {
+        const s = sample[Math.floor(((c + 0.5) / k) * sample.length)];
+        cr[c] = R[s];
+        cg[c] = G[s];
+        cb[c] = B[s];
+    }
+    const nearest = (i) => {
+        let best = 0, bd = Infinity;
+        for (let c = 0; c < k; c++) {
+            const dr = R[i] - cr[c], dg = G[i] - cg[c], db = B[i] - cb[c];
+            const d = dr * dr * 0.9 + dg * dg * 1.2 + db * db * 0.7;
+            if (d < bd) {
+                bd = d;
+                best = c;
+            }
+        }
+        return best;
+    };
+    for (let it = 0; it < 10; it++) {
+        const sr = new Float64Array(k), sg = new Float64Array(k), sb = new Float64Array(k), cnt = new Float64Array(k);
+        for (const i of sample) {
+            const c = nearest(i);
+            sr[c] += R[i];
+            sg[c] += G[i];
+            sb[c] += B[i];
+            cnt[c]++;
+        }
+        for (let c = 0; c < k; c++)
+            if (cnt[c]) {
+                cr[c] = sr[c] / cnt[c];
+                cg[c] = sg[c] / cnt[c];
+                cb[c] = sb[c] / cnt[c];
+            }
+    }
+    let lab = new Uint8Array(n);
+    for (let i = 0; i < n; i++)
+        lab[i] = nearest(i);
+    // 众数滤波，抹掉毛刺
+    for (let pass = 0; pass < 3; pass++) {
+        const next = new Uint8Array(lab);
+        const votes = new Uint8Array(k);
+        for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+                votes.fill(0);
+                for (let dy = -1; dy <= 1; dy++)
+                    for (let dx = -1; dx <= 1; dx++)
+                        votes[lab[(y + dy) * w + x + dx]]++;
+                let best = lab[y * w + x], bv = votes[best];
+                for (let c = 0; c < k; c++)
+                    if (votes[c] > bv) {
+                        bv = votes[c];
+                        best = c;
+                    }
+                next[y * w + x] = best;
+            }
+        }
+        lab = next;
+    }
+    return lab;
+}
+/** 太小的色块并入相邻色块，返回连通块编号（每个编号就是一个封闭格子）。 */
+function cleanSegments(lab, w, h, minArea) {
+    const n = w * h;
+    const seg = new Int32Array(n).fill(-1);
+    const sizes = [];
+    const stack = new Int32Array(n);
+    let next = 0;
+    for (let s = 0; s < n; s++) {
+        if (seg[s] !== -1)
+            continue;
+        const id = next++;
+        const v = lab[s];
+        let sp = 0, count = 0;
+        stack[sp++] = s;
+        seg[s] = id;
+        while (sp > 0) {
+            const i = stack[--sp];
+            count++;
+            const x = i % w;
+            if (x > 0 && seg[i - 1] === -1 && lab[i - 1] === v) {
+                seg[i - 1] = id;
+                stack[sp++] = i - 1;
+            }
+            if (x < w - 1 && seg[i + 1] === -1 && lab[i + 1] === v) {
+                seg[i + 1] = id;
+                stack[sp++] = i + 1;
+            }
+            if (i >= w && seg[i - w] === -1 && lab[i - w] === v) {
+                seg[i - w] = id;
+                stack[sp++] = i - w;
+            }
+            if (i + w < n && seg[i + w] === -1 && lab[i + w] === v) {
+                seg[i + w] = id;
+                stack[sp++] = i + w;
+            }
+        }
+        sizes.push(count);
+    }
+    // 小块的像素标为 -1，再从大块一圈圈“长”进去
+    const queue = new Int32Array(n);
+    let qh = 0, qt = 0;
+    for (let i = 0; i < n; i++) {
+        if (sizes[seg[i]] < minArea)
+            seg[i] = -1;
+    }
+    for (let i = 0; i < n; i++) {
+        if (seg[i] === -1)
+            continue;
+        const x = i % w;
+        if ((x > 0 && seg[i - 1] === -1) || (x < w - 1 && seg[i + 1] === -1) ||
+            (i >= w && seg[i - w] === -1) || (i + w < n && seg[i + w] === -1))
+            queue[qt++] = i;
+    }
+    while (qh < qt) {
+        const i = queue[qh++];
+        const x = i % w;
+        const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i + w < n ? i + w : -1];
+        for (const j of nb) {
+            if (j >= 0 && seg[j] === -1) {
+                seg[j] = seg[i];
+                queue[qt++] = j;
+            }
+        }
+    }
+    for (let i = 0; i < n; i++)
+        if (seg[i] === -1)
+            seg[i] = 0; // 整张图都是小块的极端情况
+    return seg;
+}
+// ---------- 照片 → 线稿 ----------
+/**
+ * 输入 RGBA 像素，输出线稿遮罩（1 = 黑线，0 = 空白）。
+ * 流程：灰度 → 高斯模糊 → Canny 边缘（Sobel + 非极大值抑制 + 双阈值）
+ *      → 去掉碎线 → 加粗 → （漫画风）暗部涂黑 → 把太小的空白碎块并入线条。
+ */
+function makeLineArt(rgba, w, h, style) {
+    const P = PARAMS[style];
+    const n = w * h;
+    const smooth = gaussianBlur(toGray(rgba, n), w, h, P.sigma);
+    // Sobel
+    const mag = new Float32Array(n);
+    const dir = new Uint8Array(n); // 0: 横, 1: 45°, 2: 竖, 3: 135°
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const i = y * w + x;
+            const a = smooth[i - w - 1], b = smooth[i - w], c = smooth[i - w + 1];
+            const d = smooth[i - 1], f = smooth[i + 1];
+            const g = smooth[i + w - 1], hh = smooth[i + w], k = smooth[i + w + 1];
+            const gx = c + 2 * f + k - (a + 2 * d + g);
+            const gy = g + 2 * hh + k - (a + 2 * b + c);
+            mag[i] = Math.sqrt(gx * gx + gy * gy);
+            let ang = (Math.atan2(gy, gx) * 180) / Math.PI;
+            if (ang < 0)
+                ang += 180;
+            dir[i] = ang < 22.5 || ang >= 157.5 ? 0 : ang < 67.5 ? 1 : ang < 112.5 ? 2 : 3;
+        }
+    }
+    // 非极大值抑制
+    const nms = new Float32Array(n);
+    const nz = new Float32Array(n);
+    let nzCount = 0;
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const i = y * w + x;
+            const m = mag[i];
+            if (m === 0)
+                continue;
+            let p, q;
+            switch (dir[i]) {
+                case 0:
+                    p = mag[i - 1];
+                    q = mag[i + 1];
+                    break;
+                case 1:
+                    p = mag[i - w - 1];
+                    q = mag[i + w + 1];
+                    break;
+                case 2:
+                    p = mag[i - w];
+                    q = mag[i + w];
+                    break;
+                default:
+                    p = mag[i - w + 1];
+                    q = mag[i + w - 1];
+            }
+            if (m >= p && m >= q) {
+                nms[i] = m;
+                nz[nzCount++] = m;
+            }
+        }
+    }
+    // 双阈值 + 连接
+    const high = Math.max(8, percentile(nz, nzCount, P.highPct));
+    const low = high * 0.45;
+    const edge = new Uint8Array(n);
+    const stack = new Int32Array(n);
+    let sp = 0;
+    for (let i = 0; i < n; i++) {
+        if (nms[i] >= high) {
+            edge[i] = 1;
+            stack[sp++] = i;
+        }
+    }
+    while (sp > 0) {
+        const i = stack[--sp];
+        const x = i % w;
+        const y = (i - x) / w;
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                const xx = x + dx, yy = y + dy;
+                if (xx < 0 || yy < 0 || xx >= w || yy >= h)
+                    continue;
+                const j = yy * w + xx;
+                if (!edge[j] && nms[j] >= low) {
+                    edge[j] = 1;
+                    stack[sp++] = j;
+                }
+            }
+        }
+    }
+    // 去掉很短的碎线
+    const minLen = Math.max(10, Math.round(Math.max(w, h) / 45));
+    {
+        const { labels, sizes } = components(edge, w, h, 1, true);
+        for (let i = 0; i < n; i++)
+            if (labels[i] >= 0 && sizes[labels[i]] < minLen)
+                edge[i] = 0;
+    }
+    // 色块边界：天然封闭，保证每个格子都能填色
+    const seg = cleanSegments(posterize(rgba, w, h, P.colors, P.colorSigma), w, h, Math.round(n * 0.0025));
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = y * w + x;
+            if ((x < w - 1 && seg[i] !== seg[i + 1]) || (y < h - 1 && seg[i] !== seg[i + w]))
+                edge[i] = 1;
+        }
+    }
+    let ink = dilate(edge, w, h, P.thickness);
+    // 漫画风：最暗的大块区域涂黑
+    if (P.darkFill) {
+        const darkT = Math.min(55, percentile(smooth, n, 0.06));
+        const dark = new Uint8Array(n);
+        for (let i = 0; i < n; i++)
+            if (smooth[i] <= darkT)
+                dark[i] = 1;
+        const minDark = Math.round(n * 0.0008);
+        const { labels, sizes } = components(dark, w, h, 1, false);
+        for (let i = 0; i < n; i++)
+            if (labels[i] >= 0 && sizes[labels[i]] >= minDark)
+                ink[i] = 1;
+    }
+    // 把太小的空白碎块并入线条，涂色时不会出现点不中的小格子
+    const minArea = Math.max(30, Math.round(n * 0.00012));
+    {
+        const { labels, sizes } = components(ink, w, h, 0, false);
+        for (let i = 0; i < n; i++)
+            if (labels[i] >= 0 && sizes[labels[i]] < minArea)
+                ink[i] = 1;
+    }
+    // 边框留白一圈，避免贴边的黑线
+    for (let x = 0; x < w; x++) {
+        ink[x] = 0;
+        ink[(h - 1) * w + x] = 0;
+    }
+    for (let y = 0; y < h; y++) {
+        ink[y * w] = 0;
+        ink[y * w + w - 1] = 0;
+    }
+    return ink;
+}
+/**
+ * 把线稿切成一个个可以点击填色的格子。
+ * 先把线条再加粗 1 像素当“墙”，补上细小的缺口，避免颜色漏出去；
+ * 然后把墙两侧多出来的那一圈像素分配回相邻的格子，填色时贴紧线条、没有白边。
+ */
+function buildRegions(ink, w, h) {
+    const n = w * h;
+    const wall = dilate(ink, w, h, 1);
+    const { labels, sizes } = components(wall, w, h, 0, false);
+    // 多源 BFS：把墙上（但不是黑线）的像素分给最近的格子
+    const queue = new Int32Array(n);
+    let qh = 0, qt = 0;
+    for (let i = 0; i < n; i++)
+        if (labels[i] >= 0)
+            queue[qt++] = i;
+    while (qh < qt) {
+        const i = queue[qh++];
+        const lab = labels[i];
+        const x = i % w;
+        const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w];
+        for (let k = 0; k < 4; k++) {
+            const j = nb[k];
+            if (j < 0 || j >= n)
+                continue;
+            if (labels[j] === -1 && wall[j] && !ink[j]) {
+                labels[j] = lab;
+                queue[qt++] = j;
+            }
+        }
+    }
+    const areas = new Int32Array(sizes.length);
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+        if (ink[i])
+            labels[i] = -1;
+        const l = labels[i];
+        if (l >= 0) {
+            areas[l]++;
+            total++;
+        }
+    }
+    return { labels, count: sizes.length, areas, total };
+}
+/** 找到点击位置所在的格子；点在线上时找附近最近的格子。 */
+function regionAt(regions, w, h, x, y) {
+    const xi = Math.round(x), yi = Math.round(y);
+    for (let r = 0; r <= 10; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== r)
+                    continue;
+                const xx = xi + dx, yy = yi + dy;
+                if (xx < 0 || yy < 0 || xx >= w || yy >= h)
+                    continue;
+                const l = regions.labels[yy * w + xx];
+                if (l >= 0)
+                    return l;
+            }
+        }
+    }
+    return -1;
+}
+const INK = [26, 26, 26];
+function hexToRgb(hex) {
+    const v = parseInt(hex.replace('#', ''), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+/** 合成最终画面：线条 + 每个格子的颜色（没涂的为白色）。 */
+function compose(ink, regions, colors, w, h) {
+    const n = w * h;
+    const lut = new Uint8Array(regions.count * 3).fill(255);
+    for (const key of Object.keys(colors)) {
+        const l = Number(key);
+        if (l >= 0 && l < regions.count) {
+            const [r, g, b] = hexToRgb(colors[l]);
+            lut[l * 3] = r;
+            lut[l * 3 + 1] = g;
+            lut[l * 3 + 2] = b;
+        }
+    }
+    const out = new Uint8Array(n * 4);
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+        if (ink[i]) {
+            out[j] = INK[0];
+            out[j + 1] = INK[1];
+            out[j + 2] = INK[2];
+        }
+        else {
+            const l = regions.labels[i];
+            out[j] = lut[l * 3];
+            out[j + 1] = lut[l * 3 + 1];
+            out[j + 2] = lut[l * 3 + 2];
+        }
+        out[j + 3] = 255;
+    }
+    return out;
+}
+/** 已涂面积占比 0~1 */
+function coloredRatio(regions, colors) {
+    if (!regions.total)
+        return 0;
+    let a = 0;
+    for (const key of Object.keys(colors)) {
+        const l = Number(key);
+        if (l >= 0 && l < regions.count)
+            a += regions.areas[l];
+    }
+    return a / regions.total;
+}
+
+</script>
+<script>
+'use strict';
+/* 线稿日记 · 网页版：拍照 → 线稿 → 写感受 → 涂色 → 历史 */
+
+const PALETTE = [
+  ['珊瑚红', '#FF5B3A'], ['杏橙', '#FF8A5B'], ['琥珀', '#FFB547'], ['柠檬', '#FFD966'], ['奶油', '#FFF1B8'], ['嫩芽', '#C8E6A0'], ['草绿', '#7CC47F'],
+  ['松绿', '#2F9E6E'], ['薄荷蓝', '#9ED9E0'], ['湖蓝', '#4FB3D9'], ['钴蓝', '#2D6FD6'], ['深海', '#1F3A7A'], ['薰衣草', '#B9A6F0'], ['葡萄紫', '#7B5CD6'],
+  ['樱粉', '#F7B6C8'], ['玫红', '#E2547A'], ['砖红', '#A8432F'], ['可可', '#7A5236'], ['沙色', '#D9C7A7'], ['雾灰', '#9A9A9A'], ['墨色', '#3A3A3A'],
+];
+const ERASER = 'eraser';
+
+const ICON = {
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  palette: '<path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2 0-1.5-1-2 0-3 .8-.8 2-.5 3-.5 2.5 0 4-1.5 4-4A9 9 0 0 0 12 3z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7" r="1"/>',
+  book: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  fwd: '<path d="M9 5l7 7-7 7"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  check: '<path d="M5 12l5 5 9-10"/>',
+  undo: '<path d="M9 6 4 11l5 5"/><path d="M4 11h11a5 5 0 0 1 0 10h-3"/>',
+  redo: '<path d="M15 6l5 5-5 5"/><path d="M20 11H9a5 5 0 0 0 0 10h3"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+  cal: '<path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/>',
+  save: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/>',
+  scan: '<path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/>',
+  erase: '<path d="M20 20H9L4 15l9-9 7 7-6 6"/><path d="M9 11l5 5"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
+};
+const icon = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WEEK = '日一二三四五六';
+const fmtDate = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}月${d.getDate()}日 周${WEEK[d.getDay()]}`; };
+const fmtTime = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const dayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function statusOf(p) {
+  if (p <= 0) return ['未上色', 'todo'];
+  if (p < 0.9) return [`涂色中 ${Math.round(p * 100)}%`, 'doing'];
+  return ['已完成', 'done'];
+}
+const badge = (p) => { const [t, c] = statusOf(p); return `<span class="badge ${c}">${t}</span>`; };
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { t.hidden = true; }, 2000);
+}
+
+// ---------------- 存储（IndexedDB，只在这台设备的浏览器里） ----------------
+const Store = {
+  db: null,
+  async open() {
+    try {
+      this.db = await new Promise((res, rej) => {
+        const r = indexedDB.open('xiangao-diary', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('records', { keyPath: 'id' });
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+    } catch (e) { this.db = null; }
+  },
+  async all() {
+    if (!this.db) return [];
+    return new Promise((res) => {
+      try {
+        const q = this.db.transaction('records').objectStore('records').getAll();
+        q.onsuccess = () => res(q.result || []);
+        q.onerror = () => res([]);
+      } catch (e) { res([]); }
+    });
+  },
+  put(rec) {
+    if (!this.db) return;
+    try {
+      const { previewUrl, ...plain } = rec;
+      this.db.transaction('records', 'readwrite').objectStore('records').put(plain);
+    } catch (e) { /* 存不了就只留在内存里 */ }
+  },
+  del(id) {
+    if (!this.db) return;
+    try { this.db.transaction('records', 'readwrite').objectStore('records').delete(id); } catch (e) { /* 忽略 */ }
+  },
+};
+
+const Settings = {
+  data: { nickname: '', style: 'bold', quality: 'standard' },
+  load() { try { Object.assign(this.data, JSON.parse(localStorage.getItem('xiangao-settings') || '{}')); } catch (e) { /* 用默认 */ } },
+  set(patch) { Object.assign(this.data, patch); try { localStorage.setItem('xiangao-settings', JSON.stringify(this.data)); } catch (e) { /* 忽略 */ } },
+};
+
+let records = [];
+const withUrl = (r) => { if (!r.previewUrl && r.preview) r.previewUrl = URL.createObjectURL(r.preview); return r; };
+const findRec = (id) => records.find((r) => r.id === id);
+
+// ---------------- 图像工具 ----------------
+function canvasOf(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+const toBlob = (c) => new Promise((res) => c.toBlob((b) => res(b), 'image/png'));
+function loadImg(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('这张图片打不开，换一张试试'));
+    img.src = src;
+  });
+}
+async function pixelsFromSource(src, maxSide) {
+  const img = await loadImg(src);
+  const sw = img.naturalWidth, sh = img.naturalHeight;
+  const s = Math.min(1, maxSide / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * s)), h = Math.max(1, Math.round(sh * s));
+  const c = canvasOf(w, h);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  return { w, h, rgba: new Uint8Array(ctx.getImageData(0, 0, w, h).data.buffer) };
+}
+function rgbaCanvas(rgba, w, h) {
+  const c = canvasOf(w, h);
+  c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), w, h), 0, 0);
+  return c;
+}
+function maskToRgba(ink) {
+  const out = new Uint8Array(ink.length * 4);
+  for (let i = 0, j = 0; i < ink.length; i++, j += 4) {
+    const v = ink[i] ? 26 : 255;
+    out[j] = v; out[j + 1] = v; out[j + 2] = v; out[j + 3] = 255;
+  }
+  return out;
+}
+async function maskFromBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const { w, h, rgba } = await pixelsFromSource(url, 100000);
+    const ink = new Uint8Array(w * h);
+    for (let i = 0; i < ink.length; i++) ink[i] = rgba[i * 4] < 128 ? 1 : 0;
+    return { w, h, ink };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// 第一次打开时放一张示例线稿，方便直接试涂色
+const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 360" width="600" height="720"><rect width="300" height="360" fill="#fff"/><g fill="none" stroke="#141414" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="238" cy="58" r="22"/><path d="M226 30l-4-10M250 30l4-10M266 50l10-4M210 50l-10-4"/><path d="M26 78c2-14 18-18 26-8 6-12 26-12 30 4 12-2 18 10 10 16H30c-10 0-12-10-4-12z"/><path d="M16 316V118l55-32 55 32v198z"/><path d="M34 134h26v30H34zM47 134v30M34 149h26M82 134h26v30H82zM95 134v30M82 149h26M34 182h26v30H34zM82 182h26v30H82z"/><path d="M20 232h102l-10 24H30z"/><path d="M40 232l-4 24M60 232l-2 24M82 232l2 24M102 232l4 24"/><path d="M56 266h30v50H56z"/><path d="M146 316V146h138v170z"/><path d="M146 168h138M188 151h56v12h-56z"/><path d="M162 226v-24a17 17 0 0 1 34 0v24zM234 226v-24a17 17 0 0 1 34 0v24z"/><path d="M166 248h100v40H166zM199 248v40M233 248v40"/><path d="M136 316v-36"/><circle cx="136" cy="262" r="20" fill="#fff"/><path d="M128 258c4-6 12-6 16 0"/><path d="M4 316h292"/><circle cx="196" cy="336" r="16"/><circle cx="254" cy="336" r="16"/><path d="M196 336l20-26h26l12 26M216 310l12 26 14-26M210 304h12M242 310l-4-10h10"/></g></svg>`;
+
+async function seedSample() {
+  try {
+    const { w, h, rgba } = await pixelsFromSource('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(SAMPLE_SVG), 720);
+    const ink = new Uint8Array(w * h);
+    for (let i = 0; i < ink.length; i++) ink[i] = rgba[i * 4] < 140 ? 1 : 0;
+    const blob = await toBlob(rgbaCanvas(maskToRgba(ink), w, h));
+    const rec = { id: 'sample', createdAt: Date.now() - 86400000, note: '示例：街角咖啡馆。点「去上色」试试点格子填色。', style: 'bold', w, h, colors: {}, progress: 0, line: blob, preview: blob };
+    records.push(withUrl(rec));
+    Store.put(rec);
+  } catch (e) { /* 示例失败不影响使用 */ }
+}
+
+// ---------------- 路由与渲染 ----------------
+const state = { tab: 'camera', view: 'camera', params: {} };
+const TABS = [['camera', '拍照', 'camera'], ['color', '上色', 'palette'], ['history', '历史', 'book'], ['account', '账户', 'user']];
+let cleanup = null;
+
+function go(view, params = {}) {
+  if (cleanup) { const c = cleanup; cleanup = null; c(); }
+  state.view = view;
+  state.params = params;
+  if (TABS.some((t) => t[0] === view)) state.tab = view;
+  render();
+}
+
+function renderTabs() {
+  const nav = $('#tabs');
+  const show = TABS.some((t) => t[0] === state.view);
+  nav.hidden = !show;
+  nav.className = state.view === 'camera' ? 'dark' : '';
+  nav.innerHTML = TABS.map(([id, label, ic]) =>
+    `<button type="button" data-tab="${id}" ${state.view === id ? 'aria-current="page"' : ''}>${icon(ic)}${label}</button>`).join('');
+}
+
+function render() {
+  renderTabs();
+  const v = $('#view');
+  const views = { camera: viewCamera, result: viewResult, editor: viewEditor, color: viewColor, history: viewHistory, record: viewRecord, account: viewAccount };
+  (views[state.view] || viewCamera)(v);
+}
+
+$('#tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tab]');
+  if (b) go(b.dataset.tab);
+});
+
+// ---------------- 拍照 ----------------
+function viewCamera(v) {
+  const style = state.params.style || Settings.data.style;
+  const last = records[0];
+  v.innerHTML = `
+    <div class="cam">
+      <div class="top pad">
+        <div class="seg dark" role="group" aria-label="线条风格">
+          ${STYLE_LIST.map((s) => `<button type="button" data-style="${s.id}" aria-pressed="${s.id === style}">${s.label}</button>`).join('')}
+        </div>
+      </div>
+      <div class="viewfinder">
+        ${last ? `<img src="${last.previewUrl}" alt="最近一张线稿">` : `<div class="empty" style="color:var(--muted)">${icon('camera')}<span>拍下的照片会变成可以涂色的线稿</span></div>`}
+        <span class="vf-badge">拍完自动生成「${STYLE_LIST.find((s) => s.id === style).label}」线稿</span>
+      </div>
+      <p class="hint">按下快门会打开 iPhone 相机</p>
+      <div class="controls">
+        <label class="round" for="albumInput" aria-label="从相册选择">${icon('image')}</label>
+        <label class="shutter" for="camInput" aria-label="拍照"></label>
+        <button type="button" class="round" data-go-history aria-label="查看历史" style="border:0">${icon('book')}</button>
+      </div>
+    </div>`;
+  v.querySelectorAll('[data-style]').forEach((b) => b.addEventListener('click', () => { state.params.style = b.dataset.style; viewCamera(v); }));
+  $('[data-go-history]', v).addEventListener('click', () => go('history'));
+}
+
+function onPicked(e) {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  go('result', { file: f, style: state.params.style || Settings.data.style });
+}
+$('#camInput').addEventListener('change', onPicked);
+$('#albumInput').addEventListener('change', onPicked);
+
+// ---------------- 生成结果 + 写感受 ----------------
+function viewResult(v) {
+  const p = state.params;
+  const created = Date.now();
+  let style = p.style;
+  let src = null, ink = null, busy = true;
+  v.innerHTML = `
+    <div class="bar pad">
+      <button type="button" class="icon-btn" data-back aria-label="重拍">${icon('back')}</button>
+      <h1 class="title">新的记录</h1>
+      <span style="width:44px"></span>
+    </div>
+    <div class="scroll pad">
+      <div class="result-card"><canvas id="rc"></canvas><div class="busy" id="busy"><div class="spinner"></div>正在生成线稿…</div></div>
+      <div style="display:flex;justify-content:center;margin-top:14px">
+        <div class="seg" role="group" aria-label="线条风格" id="rs">
+          ${STYLE_LIST.map((s) => `<button type="button" data-style="${s.id}" aria-pressed="${s.id === style}">${s.label}</button>`).join('')}
+        </div>
+      </div>
+      <div style="margin-top:14px"><span class="chip">${icon('cal', 'sm')}${fmtDate(created)} ${fmtTime(created)}</span></div>
+      <label class="field" for="noteInput">此刻的感受</label>
+      <textarea id="noteInput" maxlength="200" placeholder="写点什么吧：今天看到了什么、想到了什么……"></textarea>
+      <div class="counter" id="cnt">0 / 200</div>
+      <div style="height:16px"></div>
+    </div>
+    <div class="footer pad">
+      <div class="row-btns">
+        <button type="button" class="btn outline" id="saveOnly" disabled>存入历史</button>
+        <button type="button" class="btn" id="saveColor" disabled>开始上色 ${icon('arrow', 'sm')}</button>
+      </div>
+    </div>`;
+  const canvas = $('#rc', v);
+  const setBusy = (b) => {
+    busy = b;
+    $('#busy', v).hidden = !b;
+    $('#saveOnly', v).disabled = b;
+    $('#saveColor', v).disabled = b;
+  };
+  const generate = async () => {
+    setBusy(true);
+    await wait(40);
+    try {
+      if (!src) {
+        const url = URL.createObjectURL(p.file);
+        try { src = await pixelsFromSource(url, Settings.data.quality === 'high' ? 1200 : WORK_SIZE); }
+        finally { URL.revokeObjectURL(url); }
+      }
+      ink = makeLineArt(src.rgba, src.w, src.h, style);
+      canvas.width = src.w; canvas.height = src.h;
+      canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(maskToRgba(ink).buffer), src.w, src.h), 0, 0);
+    } catch (e) {
+      toast(e.message || '生成失败');
+    } finally { setBusy(false); }
+  };
+  $('#rs', v).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-style]');
+    if (!b || busy || b.dataset.style === style) return;
+    style = b.dataset.style;
+    $('#rs', v).querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    generate();
+  });
+  const note = $('#noteInput', v);
+  note.addEventListener('input', () => { $('#cnt', v).textContent = `${note.value.length} / 200`; });
+  $('[data-back]', v).addEventListener('click', () => go('camera'));
+  const save = async (thenColor) => {
+    if (!ink) return;
+    setBusy(true);
+    const blob = await toBlob(rgbaCanvas(maskToRgba(ink), src.w, src.h));
+    const rec = withUrl({ id: Date.now().toString(36), createdAt: created, note: note.value.trim(), style, w: src.w, h: src.h, colors: {}, progress: 0, line: blob, preview: blob });
+    records.unshift(rec);
+    Store.put(rec);
+    if (thenColor) go('editor', { id: rec.id, from: 'history' });
+    else { go('history'); toast('已存入历史'); }
+  };
+  $('#saveOnly', v).addEventListener('click', () => save(false));
+  $('#saveColor', v).addEventListener('click', () => save(true));
+  if (p.file) generate(); else go('camera');
+}
+
+// ---------------- 上色编辑器 ----------------
+function viewEditor(v) {
+  const rec = findRec(state.params.id);
+  if (!rec) { go('color'); return; }
+  const from = state.params.from || 'color';
+  let current = PALETTE[1][1];
+  let colors = { ...rec.colors };
+  let undoStack = [], redoStack = [];
+  let data = null, dirty = false;
+  let view = { scale: 1, tx: 0, ty: 0 };
+  const MAX = 8;
+
+  v.innerHTML = `
+    <div class="bar pad" style="padding-right:max(12px, env(safe-area-inset-right, 0px))">
+      <button type="button" class="icon-btn" id="eBack" aria-label="返回">${icon('back')}</button>
+      <h1 class="title" style="text-align:left">${esc(rec.note ? rec.note : fmtDate(rec.createdAt))}</h1>
+      <button type="button" class="icon-btn" id="eUndo" aria-label="撤销" disabled>${icon('undo')}</button>
+      <button type="button" class="icon-btn" id="eRedo" aria-label="重做" disabled>${icon('redo')}</button>
+      <button type="button" class="done-btn" id="eDone">${icon('check', 'sm')}完成</button>
+    </div>
+    <div class="stage" id="stage">
+      <canvas id="ec" aria-label="线稿画布，点击格子填色"></canvas>
+      <div class="busy" id="ebusy"><div class="spinner"></div>正在准备画布…</div>
+      <div class="tip">点格子填色 · 双指缩放 · 拖动查看</div>
+      <button type="button" class="zoom-btn" id="zoomBtn" aria-label="缩放复原">${icon('scan', 'sm')}<span>100%</span></button>
+    </div>
+    <div class="palette-sheet pad">
+      <div class="sheet-head">
+        <div class="cur"><i id="curDot"></i><span id="curName"></span></div>
+        <div style="display:flex;align-items:center;gap:10px"><div class="progress"><i id="prog"></i></div><span id="progT" style="font-size:13px;color:var(--muted)"></span></div>
+      </div>
+      <div class="swatches" id="sw">
+        ${PALETTE.map(([n, hex]) => `<button type="button" data-c="${hex}" aria-label="${n}" style="background:${hex}"></button>`).join('')}
+      </div>
+      <button type="button" class="eraser" id="eraser" aria-pressed="false">${icon('erase', 'sm')}橡皮擦（点格子变回白色）</button>
+    </div>`;
+
+  const stage = $('#stage', v), canvas = $('#ec', v), ctx = canvas.getContext('2d');
+  const off = document.createElement('canvas');
+  let box = { w: 0, h: 0 };
+
+  const updatePalette = () => {
+    v.querySelectorAll('#sw button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.c === current)));
+    $('#eraser', v).setAttribute('aria-pressed', String(current === ERASER));
+    const dot = $('#curDot', v);
+    dot.style.background = current === ERASER ? 'var(--white)' : current;
+    $('#curName', v).textContent = current === ERASER ? '橡皮擦' : (PALETTE.find((p) => p[1] === current) || [''])[0];
+  };
+  const updateProgress = () => {
+    const p = data ? coloredRatio(data.regions, colors) : rec.progress;
+    $('#prog', v).style.width = `${Math.round(p * 100)}%`;
+    $('#progT', v).textContent = `已涂 ${Math.round(p * 100)}%`;
+    $('#eUndo', v).disabled = !undoStack.length;
+    $('#eRedo', v).disabled = !redoStack.length;
+  };
+  const geom = () => {
+    const fit = Math.min(box.w / data.w, box.h / data.h);
+    return { fit, ox: (box.w - data.w * fit) / 2, oy: (box.h - data.h * fit) / 2, cw: data.w * fit, ch: data.h * fit };
+  };
+  const draw = () => {
+    if (!data || !box.w) return;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, box.w, box.h);
+    const g = geom();
+    ctx.imageSmoothingEnabled = view.scale * g.fit < 1.5;
+    ctx.drawImage(off, g.ox + view.tx, g.oy + view.ty, g.cw * view.scale, g.ch * view.scale);
+    $('#zoomBtn span', v).textContent = view.scale > 1.01 ? `${Math.round(view.scale * 100)}% · 复原` : '100%';
+  };
+  const resize = () => {
+    const r = stage.getBoundingClientRect();
+    box = { w: r.width, h: r.height };
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    draw();
+  };
+  const recompose = () => {
+    off.width = data.w; off.height = data.h;
+    const rgba = compose(data.ink, data.regions, colors, data.w, data.h);
+    off.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), data.w, data.h), 0, 0);
+    draw();
+    updateProgress();
+  };
+  const setRegion = (label, color) => {
+    colors = { ...colors };
+    if (color) colors[label] = color; else delete colors[label];
+    dirty = true;
+    recompose();
+  };
+  const clamp = (s) => {
+    const g = geom();
+    const scale = Math.min(MAX, Math.max(1, s.scale));
+    const cx = (g.cw * (1 - scale)) / 2, cy = (g.ch * (1 - scale)) / 2;
+    const lx = (g.cw * (scale - 1)) / 2 + box.w * 0.25, ly = (g.ch * (scale - 1)) / 2 + box.h * 0.25;
+    return { scale, tx: Math.min(cx + lx, Math.max(cx - lx, s.tx)), ty: Math.min(cy + ly, Math.max(cy - ly, s.ty)) };
+  };
+  const paintAt = (sx, sy) => {
+    if (!data) return;
+    const g = geom();
+    const s = g.fit * view.scale;
+    const x = (sx - g.ox - view.tx) / s, y = (sy - g.oy - view.ty) / s;
+    if (x < 0 || y < 0 || x >= data.w || y >= data.h) return;
+    const label = regionAt(data.regions, data.w, data.h, x, y);
+    if (label < 0) return;
+    const prev = colors[label];
+    const next = current === ERASER ? undefined : current;
+    if (prev === next) return;
+    undoStack.push({ label, prev, next });
+    if (undoStack.length > 60) undoStack.shift();
+    redoStack = [];
+    setRegion(label, next);
+  };
+
+  // 手势：一指拖动、两指缩放、轻点填色；电脑上可用滚轮缩放
+  const pts = new Map();
+  let gest = null;
+  const local = (e) => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, local(e));
+    if (pts.size === 1) gest = { type: 'one', start: local(e), v0: { ...view }, moved: false, multi: false };
+    else if (pts.size === 2 && data) {
+      const [a, b] = [...pts.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const g = geom();
+      gest = { type: 'two', dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, v0: { ...view }, p: { x: (mid.x - g.ox - view.tx) / (g.fit * view.scale), y: (mid.y - g.oy - view.ty) / (g.fit * view.scale) }, multi: true };
+    }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId) || !gest || !data) return;
+    pts.set(e.pointerId, local(e));
+    if (gest.type === 'two' && pts.size >= 2) {
+      const [a, b] = [...pts.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const g = geom();
+      const scale = Math.min(MAX, Math.max(1, gest.v0.scale * (Math.hypot(a.x - b.x, a.y - b.y) / gest.dist)));
+      view = clamp({ scale, tx: mid.x - g.ox - g.fit * scale * gest.p.x, ty: mid.y - g.oy - g.fit * scale * gest.p.y });
+      draw();
+    } else if (gest.type === 'one') {
+      const p = local(e);
+      const dx = p.x - gest.start.x, dy = p.y - gest.start.y;
+      if (!gest.moved && Math.hypot(dx, dy) > 8) gest.moved = true;
+      if (gest.moved) { view = clamp({ scale: view.scale, tx: gest.v0.tx + dx, ty: gest.v0.ty + dy }); draw(); }
+    }
+  });
+  const end = (e) => {
+    if (!pts.has(e.pointerId)) return;
+    const p = pts.get(e.pointerId);
+    pts.delete(e.pointerId);
+    if (gest && gest.type === 'one' && !gest.moved && !gest.multi && e.type === 'pointerup') paintAt(p.x, p.y);
+    if (pts.size === 1) {
+      const [q] = [...pts.values()];
+      gest = { type: 'one', start: q, v0: { ...view }, moved: true, multi: true };
+    } else if (pts.size === 0) gest = null;
+  };
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', (e) => {
+    if (!data) return;
+    e.preventDefault();
+    const m = local(e), g = geom();
+    const p = { x: (m.x - g.ox - view.tx) / (g.fit * view.scale), y: (m.y - g.oy - view.ty) / (g.fit * view.scale) };
+    const scale = Math.min(MAX, Math.max(1, view.scale * Math.exp(-e.deltaY * 0.002)));
+    view = clamp({ scale, tx: m.x - g.ox - g.fit * scale * p.x, ty: m.y - g.oy - g.fit * scale * p.y });
+    draw();
+  }, { passive: false });
+
+  $('#zoomBtn', v).addEventListener('click', () => { view = { scale: 1, tx: 0, ty: 0 }; draw(); });
+  $('#sw', v).addEventListener('click', (e) => { const b = e.target.closest('[data-c]'); if (b) { current = b.dataset.c; updatePalette(); } });
+  $('#eraser', v).addEventListener('click', () => { current = ERASER; updatePalette(); });
+  $('#eUndo', v).addEventListener('click', () => { const s = undoStack.pop(); if (s) { redoStack.push(s); setRegion(s.label, s.prev); } });
+  $('#eRedo', v).addEventListener('click', () => { const s = redoStack.pop(); if (s) { undoStack.push(s); setRegion(s.label, s.next); } });
+
+  const save = async () => {
+    if (!data || !dirty) return;
+    dirty = false;
+    const rgba = compose(data.ink, data.regions, colors, data.w, data.h);
+    const blob = await toBlob(rgbaCanvas(rgba, data.w, data.h));
+    if (rec.previewUrl) URL.revokeObjectURL(rec.previewUrl);
+    rec.previewUrl = null;
+    rec.preview = blob;
+    rec.colors = colors;
+    rec.progress = coloredRatio(data.regions, colors);
+    withUrl(rec);
+    Store.put(rec);
+  };
+  $('#eBack', v).addEventListener('click', () => go(from === 'record' ? 'record' : from, { id: rec.id }));
+  $('#eDone', v).addEventListener('click', () => { go('record', { id: rec.id }); toast('已保存'); });
+
+  const ro = new ResizeObserver(resize);
+  ro.observe(stage);
+  cleanup = () => { ro.disconnect(); save(); };
+
+  updatePalette();
+  updateProgress();
+  (async () => {
+    await wait(40);
+    try {
+      const m = await maskFromBlob(rec.line);
+      data = { ...m, regions: buildRegions(m.ink, m.w, m.h) };
+      resize();
+      recompose();
+    } catch (e) { toast('打开失败：' + (e.message || e)); }
+    const b = $('#ebusy', v); if (b) b.hidden = true;
+  })();
+}
+
+// ---------------- 上色列表 ----------------
+function viewColor(v) {
+  const list = [...records].sort((a, b) => (a.progress >= 0.9) - (b.progress >= 0.9) || b.createdAt - a.createdAt);
+  const todo = records.filter((r) => r.progress < 0.9).length;
+  v.innerHTML = `
+    <div class="head pad"><h1 class="h1">上色</h1><p class="sub">${records.length ? `还有 ${todo} 张等你涂色` : '先去拍一张照片吧'}</p></div>
+    ${records.length ? `<div class="scroll pad"><div class="grid2">
+      ${list.map((r) => `<button type="button" class="tile" data-id="${r.id}" aria-label="给 ${fmtDate(r.createdAt)} 的线稿上色">
+        <img src="${r.previewUrl}" alt="">
+        <span class="meta"><span class="d">${fmtDate(r.createdAt)}</span>
+        <span class="p"><span class="progress"><i style="width:${Math.round(r.progress * 100)}%"></i></span>${r.progress >= 0.9 ? '已完成' : Math.round(r.progress * 100) + '%'}</span></span>
+      </button>`).join('')}
+    </div></div>` : `<div class="empty">${icon('palette')}<span>拍下的照片会变成线稿，出现在这里等你涂色。</span><button type="button" class="btn" data-cam style="padding:0 28px">去拍照</button></div>`}`;
+  v.querySelectorAll('[data-id]').forEach((b) => b.addEventListener('click', () => go('editor', { id: b.dataset.id, from: 'color' })));
+  const c = $('[data-cam]', v); if (c) c.addEventListener('click', () => go('camera'));
+}
+
+// ---------------- 历史 ----------------
+const histState = { mode: 'timeline', month: null, day: dayKey(Date.now()) };
+function cardHtml(r) {
+  const done = r.progress >= 0.9;
+  return `<div class="card" role="button" tabindex="0" data-open="${r.id}">
+    <img src="${r.previewUrl}" alt="">
+    <div class="body">
+      <span class="date">${fmtDate(r.createdAt)} · ${fmtTime(r.createdAt)}</span>
+      <span class="note ${r.note ? '' : 'none'}">${r.note ? esc(r.note) : '没有写文字'}</span>
+      <span class="foot">${badge(r.progress)}${done ? '' : `<button type="button" class="go" data-color="${r.id}" style="border:0;background:none;min-height:32px">${r.progress > 0 ? '继续 →' : '去上色 →'}</button>`}</span>
+    </div>
+  </div>`;
+}
+function bindCards(root) {
+  root.querySelectorAll('[data-color]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); go('editor', { id: b.dataset.color, from: 'history' }); }));
+  root.querySelectorAll('[data-open]').forEach((b) => {
+    b.addEventListener('click', () => go('record', { id: b.dataset.open }));
+    b.addEventListener('keydown', (e) => { if (e.key === 'Enter') go('record', { id: b.dataset.open }); });
+  });
+}
+function viewHistory(v) {
+  const now = new Date();
+  if (!histState.month) histState.month = { y: now.getFullYear(), m: now.getMonth() };
+  const monthCount = records.filter((r) => { const d = new Date(r.createdAt); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); }).length;
+  const byDay = new Map();
+  records.forEach((r) => { const k = dayKey(r.createdAt); byDay.set(k, [...(byDay.get(k) || []), r]); });
+  let body = '';
+  if (!records.length) {
+    body = `<div class="empty">${icon('book')}<span>还没有记录。拍一张照片，写下当时的感受，它就会出现在这里。</span><button type="button" class="btn" data-cam style="padding:0 28px">去拍照</button></div>`;
+  } else if (histState.mode === 'timeline') {
+    body = `<div class="scroll pad"><div class="list">${records.map(cardHtml).join('')}</div></div>`;
+  } else {
+    const { y, m } = histState.month;
+    const offset = (new Date(y, m, 1).getDay() + 6) % 7;
+    const days = new Date(y, m + 1, 0).getDate();
+    const cells = Array(offset).fill(null);
+    for (let d = 1; d <= days; d++) cells.push(d);
+    while (cells.length % 7) cells.push(null);
+    const today = dayKey(Date.now());
+    const sel = byDay.get(histState.day) || [];
+    const [, sm, sd] = histState.day.split('-');
+    body = `<div class="scroll pad">
+      <div class="cal-head"><button type="button" class="icon-btn" data-mon="-1" aria-label="上个月">${icon('back')}</button><h2>${y} 年 ${m + 1} 月</h2><button type="button" class="icon-btn" data-mon="1" aria-label="下个月">${icon('fwd')}</button></div>
+      <div class="week">${'一二三四五六日'.split('').map((w) => `<span>${w}</span>`).join('')}</div>
+      <div class="week">${cells.map((d) => {
+        if (!d) return '<span></span>';
+        const k = `${y}-${m + 1}-${d}`;
+        const rs = byDay.get(k);
+        return `<button type="button" class="day ${rs ? 'has' : ''} ${k === today ? 'today' : ''} ${k === histState.day ? 'sel' : ''}" data-day="${k}" aria-label="${m + 1}月${d}日${rs ? `，${rs.length} 条记录` : ''}">${rs ? `<img src="${rs[0].previewUrl}" alt="">` : ''}<b>${d}</b></button>`;
+      }).join('')}</div>
+      <p style="font-weight:800;margin:18px 0 0">${sm}月${sd}日 · ${sel.length ? `${sel.length} 条` : '这天没有记录'}</p>
+      <div class="list">${sel.map(cardHtml).join('')}</div>
+    </div>`;
+  }
+  v.innerHTML = `
+    <div class="head pad">
+      <h1 class="h1">我的记录</h1>
+      <p class="sub">${now.getFullYear()} 年 ${now.getMonth() + 1} 月 · 本月 ${monthCount} 条记录</p>
+      <div class="tabs2" role="tablist" aria-label="查看方式">
+        <button type="button" role="tab" data-mode="timeline" aria-selected="${histState.mode === 'timeline'}">时间轴</button>
+        <button type="button" role="tab" data-mode="calendar" aria-selected="${histState.mode === 'calendar'}">日历</button>
+      </div>
+    </div>${body}`;
+  v.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { histState.mode = b.dataset.mode; viewHistory(v); }));
+  v.querySelectorAll('[data-mon]').forEach((b) => b.addEventListener('click', () => {
+    const d = new Date(histState.month.y, histState.month.m + Number(b.dataset.mon), 1);
+    histState.month = { y: d.getFullYear(), m: d.getMonth() };
+    viewHistory(v);
+  }));
+  v.querySelectorAll('[data-day]').forEach((b) => b.addEventListener('click', () => { histState.day = b.dataset.day; viewHistory(v); }));
+  const c = $('[data-cam]', v); if (c) c.addEventListener('click', () => go('camera'));
+  bindCards(v);
+}
+
+// ---------------- 单条记录 ----------------
+function viewRecord(v) {
+  const rec = findRec(state.params.id);
+  if (!rec) { go('history'); return; }
+  v.innerHTML = `
+    <div class="bar pad">
+      <button type="button" class="icon-btn" id="rBack" aria-label="返回">${icon('back')}</button>
+      <h1 class="title">${fmtDate(rec.createdAt)}</h1>
+      <span style="width:44px"></span>
+    </div>
+    <div class="scroll pad"><div class="stack">
+      <img class="detail-img" src="${rec.previewUrl}" alt="作品">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="font-size:13px;color:var(--muted)">${fmtTime(rec.createdAt)} · ${STYLE_LIST.find((s) => s.id === rec.style).label}线稿</span>${badge(rec.progress)}
+      </div>
+      <label class="field" for="rNote" style="margin:4px 0 0">当时的感受</label>
+      <textarea id="rNote" maxlength="200" placeholder="补写一点当时的心情……">${esc(rec.note)}</textarea>
+      <button type="button" class="btn" id="rColor">${icon('palette', 'sm')}${rec.progress > 0 ? '继续上色' : '开始上色'}</button>
+      <button type="button" class="btn outline" id="rSave">${icon('save', 'sm')}保存到相册</button>
+      <button type="button" class="btn outline" id="rDel">删除这条记录</button>
+    </div></div>`;
+  const note = $('#rNote', v);
+  const saveNote = () => { if (note.value.trim() !== rec.note) { rec.note = note.value.trim(); Store.put(rec); } };
+  note.addEventListener('change', saveNote);
+  cleanup = saveNote;
+  $('#rBack', v).addEventListener('click', () => go('history'));
+  $('#rColor', v).addEventListener('click', () => go('editor', { id: rec.id, from: 'record' }));
+  $('#rSave', v).addEventListener('click', async () => {
+    const dataUrl = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(rec.preview); });
+    openOverlay(`<h2>保存到相册</h2><p>在 iPhone 上<b>长按下面的图片</b>，选择「存储到照片」。电脑上右键「图片存储为」。</p><img class="save-img" src="${dataUrl}" alt="作品"><button type="button" class="btn outline" data-close>关闭</button>`);
+  });
+  $('#rDel', v).addEventListener('click', () => {
+    openOverlay(`<h2>删除这条记录？</h2><p>线稿、涂色和文字都会删除，无法恢复。</p><button type="button" class="btn danger" id="okDel">删除</button><button type="button" class="btn outline" data-close>取消</button>`);
+    $('#okDel').addEventListener('click', () => {
+      records = records.filter((r) => r !== rec);
+      Store.del(rec.id);
+      closeOverlay();
+      cleanup = null;
+      go('history');
+      toast('已删除');
+    });
+  });
+}
+
+// ---------------- 账户 ----------------
+function viewAccount(v) {
+  const s = Settings.data;
+  const days = new Set(records.map((r) => dayKey(r.createdAt)));
+  let streak = 0;
+  const d = new Date();
+  if (!days.has(dayKey(d.getTime()))) d.setDate(d.getDate() - 1);
+  while (days.has(dayKey(d.getTime()))) { streak++; d.setDate(d.getDate() - 1); }
+  const seg = (name, opts, val) => `<div class="seg" role="group" data-set="${name}">${opts.map(([id, l]) => `<button type="button" data-v="${id}" aria-pressed="${id === val}">${l}</button>`).join('')}</div>`;
+  v.innerHTML = `
+    <div class="scroll pad" style="padding-bottom:24px">
+      <div class="head" style="padding-inline:0"><h1 class="h1">账户</h1></div>
+      <div class="profile" style="margin-top:10px">
+        <div class="avatar" id="av">${esc((s.nickname || '我').slice(0, 1))}</div>
+        <div style="flex:1;min-width:0">
+          <label for="nick" class="vh">昵称</label>
+          <input id="nick" maxlength="16" placeholder="点这里填写昵称" value="${esc(s.nickname)}">
+          <div style="font-size:13px;color:var(--muted)">用线条记录每一天</div>
+        </div>
+        ${icon('edit')}
+      </div>
+      <div class="stats" style="margin-top:14px">
+        <div style="background:var(--tint-orange)"><b>${records.length}</b><span>条记录</span></div>
+        <div style="background:var(--tint-green)"><b>${records.filter((r) => r.progress >= 0.9).length}</b><span>张已上色</span></div>
+        <div style="background:var(--tint-blue)"><b>${streak}</b><span>天连续记录</span></div>
+      </div>
+      <h2 class="group-title">创作</h2>
+      <div class="group">
+        <div class="item"><span>默认线稿风格</span>${seg('style', STYLE_LIST.map((x) => [x.id, x.label]), s.style)}</div>
+        <div class="item"><span>线稿清晰度</span><small>高清线条更细腻，但生成会慢一些</small>${seg('quality', [['standard', '标准'], ['high', '高清']], s.quality)}</div>
+      </div>
+      <h2 class="group-title">数据</h2>
+      <div class="group">
+        <div class="item inline"><span>存储位置</span><span style="color:var(--muted);font-size:14px">只在这台设备的浏览器里</span></div>
+        <div class="item inline"><button type="button" class="link-danger" id="clear">清空所有记录</button></div>
+      </div>
+      <h2 class="group-title">添加到主屏幕</h2>
+      <div class="group"><div class="item"><span style="line-height:1.6;font-size:14px;color:var(--ink-soft)">在 iPhone 的 Safari 里点底部的「分享」按钮，选择「添加到主屏幕」，以后就能像 App 一样从桌面打开。</span></div></div>
+      <h2 class="group-title">关于</h2>
+      <div class="group"><div class="item inline"><span>线稿日记 · 网页测试版</span><span style="color:var(--muted);font-size:14px">1.0</span></div></div>
+    </div>`;
+  const nick = $('#nick', v);
+  nick.addEventListener('change', () => { Settings.set({ nickname: nick.value.trim() }); $('#av', v).textContent = (nick.value.trim() || '我').slice(0, 1); });
+  v.querySelectorAll('[data-set]').forEach((g) => g.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-v]');
+    if (!b) return;
+    Settings.set({ [g.dataset.set]: b.dataset.v });
+    g.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+  $('#clear', v).addEventListener('click', () => {
+    openOverlay(`<h2>清空所有记录？</h2><p>所有线稿、涂色和文字都会从这台设备上删除，无法恢复。</p><button type="button" class="btn danger" id="okClear">全部清空</button><button type="button" class="btn outline" data-close>取消</button>`);
+    $('#okClear').addEventListener('click', () => {
+      records.forEach((r) => Store.del(r.id));
+      records = [];
+      closeOverlay();
+      viewAccount(v);
+      toast('已清空');
+    });
+  });
+}
+
+// ---------------- 弹层 ----------------
+function openOverlay(html) {
+  const o = $('#overlay');
+  o.innerHTML = `<div class="panel" role="dialog" aria-modal="true">${html}</div>`;
+  o.hidden = false;
+  o.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeOverlay));
+}
+function closeOverlay() { const o = $('#overlay'); o.hidden = true; o.innerHTML = ''; }
+$('#overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') closeOverlay(); });
+
+// ---------------- 启动 ----------------
+(async () => {
+  Settings.load();
+  await Store.open();
+  records = (await Store.all()).sort((a, b) => b.createdAt - a.createdAt).map(withUrl);
+  let seeded = false;
+  try { seeded = localStorage.getItem('xiangao-seeded') === '1'; } catch (e) { /* 忽略 */ }
+  if (!records.length && !seeded) {
+    await seedSample();
+    try { localStorage.setItem('xiangao-seeded', '1'); } catch (e) { /* 忽略 */ }
+  }
+  render();
+})();
+
+</script>
+
+</body>
+</html>
