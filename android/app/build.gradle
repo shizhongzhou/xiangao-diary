@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.shizhongzhou.xiangaodiary'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.shizhongzhou.xiangaodiary'
+        minSdk 24
+        targetSdk 34
+        // 版本号由打包流程传入（每次构建自动加一），本地构建默认 1
+        versionCode((project.findProperty('versionCode') ?: '1') as int)
+        versionName((project.findProperty('versionName') ?: '1.0') as String)
+    }
+
+    signingConfigs {
+        // 测试用签名：固定一个证书，这样新版本可以直接覆盖安装旧版本。
+        // 正式上架应用商店前要换成自己保管的私密证书。
+        test {
+            storeFile file('xiangao-test.jks')
+            storePassword 'xiangao-test'
+            keyAlias 'xiangao'
+            keyPassword 'xiangao-test'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.test
+        }
+        debug {
+            signingConfig signingConfigs.test
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

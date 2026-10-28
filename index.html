@@ -1557,6 +1557,11 @@ function viewRecord(v) {
   $('#rColor', v).addEventListener('click', () => go('editor', { id: rec.id, from: 'record' }));
   $('#rSave', v).addEventListener('click', async () => {
     const dataUrl = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(rec.preview); });
+    // 安卓 App 里直接存进系统相册
+    if (window.AndroidBridge && window.AndroidBridge.saveImage) {
+      window.AndroidBridge.saveImage(dataUrl);
+      return;
+    }
     openOverlay(`<h2>保存到相册</h2><p>在 iPhone 上<b>长按下面的图片</b>，选择「存储到照片」。电脑上右键「图片存储为」。</p><img class="save-img" src="${dataUrl}" alt="作品"><button type="button" class="btn outline" data-close>关闭</button>`);
   });
   $('#rDel', v).addEventListener('click', () => {
@@ -1641,6 +1646,16 @@ function openOverlay(html) {
 }
 function closeOverlay() { const o = $('#overlay'); o.hidden = true; o.innerHTML = ''; }
 $('#overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') closeOverlay(); });
+
+// ---------------- 安卓返回键 ----------------
+// 安卓 App 按返回键时调用：返回 true 表示网页已经处理，false 表示退出 App
+window.__appBack = () => {
+  if (!$('#overlay').hidden) { closeOverlay(); return true; }
+  const back = $('#view [data-back], #eBack, #rBack');
+  if (back) { back.click(); return true; }
+  if (state.view !== 'camera') { go('camera'); return true; }
+  return false;
+};
 
 // ---------------- 启动 ----------------
 (async () => {
