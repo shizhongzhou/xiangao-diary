@@ -50,7 +50,18 @@ jobs:
 
       - name: 打包 APK
         working-directory: android
-        run: gradle assembleRelease --no-daemon -PversionCode=${{ github.run_number }} -PversionName=1.0.${{ github.run_number }}
+        run: |
+          set -o pipefail
+          if ! gradle assembleRelease --no-daemon --stacktrace -PversionCode=${{ github.run_number }} -PversionName=1.0.${{ github.run_number }} 2>&1 | tee build.log; then
+            # 把关键报错写成注释，方便在不看完整日志的情况下排查
+            grep -E "error:|What went wrong|Could not|FAILURE|Exception|\.java:[0-9]+" build.log | head -40 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            sed -n '/What went wrong/,/Try:/p' build.log | head -30 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit 1
+          fi
 
       - name: 整理文件
         run: cp android/app/build/outputs/apk/release/app-release.apk xiangao-diary.apk

@@ -36,6 +36,12 @@ android {
         }
     }
 
+    // 自己安装测试用，不走应用商店，关闭发布前的 lint 强制检查（例如「目标系统版本过旧」）
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
